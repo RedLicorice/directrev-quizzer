@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
-import type { Mode, SessionConfig, SessionResult, Question } from './types';
+import type { Mode, SessionConfig, SessionResult, Question, Stats } from './types';
 import { DEFAULT_CONFIGS } from './types';
 import { shuffle } from './utils/shuffle';
+import { weightedSample } from './utils/weightedSample';
 import HomeScreen from './components/HomeScreen';
 import ConfigScreen from './components/ConfigScreen';
 import ExamSession from './components/ExamSession';
@@ -17,6 +18,7 @@ type Screen =
 
 const IMPORTED_QUESTIONS_KEY = 'quizzer_imported_questions';
 const NOTES_KEY = 'quizzer_notes';
+export const STATS_KEY = 'quizzer_stats';
 
 function downloadJSON(data: unknown, filename: string) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -30,6 +32,13 @@ function downloadJSON(data: unknown, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function readJSON<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch { return fallback; }
+}
+
 let bundledCache: Question[] | null = null;
 async function loadBundled(): Promise<Question[]> {
   if (bundledCache) return bundledCache;
@@ -37,20 +46,12 @@ async function loadBundled(): Promise<Question[]> {
     const mod = await import('./data/questions.json');
     bundledCache = mod.default as Question[];
     return bundledCache;
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
 function loadFromStorage(): Question[] | null {
-  try {
-    const raw = localStorage.getItem(IMPORTED_QUESTIONS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Question[];
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
-  } catch {
-    return null;
-  }
+  const parsed = readJSON<Question[]>(IMPORTED_QUESTIONS_KEY, []);
+  return parsed.length > 0 ? parsed : null;
 }
 
 export default function App() {
@@ -68,19 +69,12 @@ export default function App() {
   }, [allQuestions]);
 
   const handleSelectMode = useCallback(
-    async (mode: Mode) => {
-      await ensureLoaded();
-      setScreen({ name: 'config', mode });
-    },
+    async (mode: Mode) => { await ensureLoaded(); setScreen({ name: 'config', mode }); },
     [ensureLoaded],
   );
 
-  // Called by HomeScreen's import button and BackupRestoreModal
   const handleSetQuestions = useCallback((questions: Question[], persist: boolean) => {
-    if (persist) {
-      localStorage.setItem(IMPORTED_QUESTIONS_KEY, JSON.stringify(questions));
-      setIsImported(true);
-    }
+    if (persist) { localStorage.setItem(IMPORTED_QUESTIONS_KEY, JSON.stringify(questions)); setIsImported(true); }
     setAllQuestions(questions);
     setLoadError(false);
   }, []);
@@ -89,51 +83,59 @@ export default function App() {
     localStorage.removeItem(IMPORTED_QUESTIONS_KEY);
     setIsImported(false);
     setAllQuestions([]);
-    // Reload bundled silently
-    loadBundled().then((qs) => {
-      setAllQuestions(qs);
-      if (qs.length === 0) setLoadError(true);
-    });
+    loadBundled().then((qs) => { setAllQuestions(qs); if (qs.length === 0) setLoadError(true); });
   }, []);
 
   const handleBackup = useCallback(() => {
-    const notes = (() => {
-      try { return JSON.parse(localStorage.getItem(NOTES_KEY) ?? '{}'); } catch { return {}; }
-    })();
     downloadJSON(
-      { version: 1, exportedAt: new Date().toISOString(), questions: allQuestions, notes },
+      {
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        questions: allQuestions,
+        notes: readJSON(NOTES_KEY, {}),
+        stats: readJSON(STATS_KEY, {}),
+      },
       `quizzer-backup-${new Date().toISOString().slice(0, 10)}.json`,
     );
   }, [allQuestions]);
 
-  const handleRestoreData = useCallback((data: { questions?: Question[]; notes?: Record<string, string> }) => {
+  const handleRestoreData = useCallback((data: {
+    questions?: Question[];
+    notes?: Record<string, string>;
+    stats?: Stats;
+  }) => {
     if (data.questions) {
       localStorage.setItem(IMPORTED_QUESTIONS_KEY, JSON.stringify(data.questions));
       setIsImported(true);
       setAllQuestions(data.questions);
       setLoadError(false);
     }
-    if (data.notes) {
-      localStorage.setItem(NOTES_KEY, JSON.stringify(data.notes));
-    }
+    if (data.notes) localStorage.setItem(NOTES_KEY, JSON.stringify(data.notes));
+    if (data.stats) localStorage.setItem(STATS_KEY, JSON.stringify(data.stats));
+  }, []);
+
+  const handleResetStats = useCallback(() => {
+    localStorage.removeItem(STATS_KEY);
   }, []);
 
   const handleStartSession = useCallback(
     (mode: Mode, config: SessionConfig) => {
-      let qs = allQuestions.slice();
-      if (config.shuffle) qs = shuffle(qs);
-      qs = qs.slice(0, config.questionCount);
+      let qs: Question[];
+      if (mode === 'practice' && config.bias !== 0.5) {
+        const stats = readJSON<Stats>(STATS_KEY, {});
+        qs = weightedSample(allQuestions, stats, config.bias, config.questionCount);
+      } else {
+        qs = config.shuffle ? shuffle(allQuestions) : allQuestions.slice();
+        qs = qs.slice(0, config.questionCount);
+      }
       setScreen({ name: 'session', mode, config, questions: qs });
     },
     [allQuestions],
   );
 
   const handleSessionEnd = useCallback((result: SessionResult) => {
-    if (result.mode === 'flashcard') {
-      setScreen({ name: 'home' });
-    } else {
-      setScreen({ name: 'results', result });
-    }
+    if (result.mode === 'flashcard') setScreen({ name: 'home' });
+    else setScreen({ name: 'results', result });
   }, []);
 
   const handleHome = useCallback(() => setScreen({ name: 'home' }), []);
@@ -152,6 +154,7 @@ export default function App() {
         onClearImported={handleClearImported}
         onBackup={handleBackup}
         onRestoreData={handleRestoreData}
+        onResetStats={handleResetStats}
         defaultConfigs={DEFAULT_CONFIGS}
       />
     );
@@ -170,36 +173,16 @@ export default function App() {
 
   if (screen.name === 'session') {
     if (screen.mode === 'exam') {
-      return (
-        <ExamSession
-          questions={screen.questions}
-          config={screen.config}
-          onFinish={handleSessionEnd}
-          onExit={handleHome}
-        />
-      );
+      return <ExamSession questions={screen.questions} config={screen.config} onFinish={handleSessionEnd} onExit={handleHome} />;
     }
     if (screen.mode === 'practice') {
-      return (
-        <PracticeSession
-          questions={screen.questions}
-          config={screen.config}
-          onFinish={handleSessionEnd}
-          onExit={handleHome}
-        />
-      );
+      return <PracticeSession questions={screen.questions} config={screen.config} onFinish={handleSessionEnd} onExit={handleHome} />;
     }
     return <FlashcardSession questions={screen.questions} onExit={handleHome} />;
   }
 
   if (screen.name === 'results') {
-    return (
-      <ResultsScreen
-        result={screen.result}
-        onHome={handleHome}
-        onRetry={handleRetry}
-      />
-    );
+    return <ResultsScreen result={screen.result} onHome={handleHome} onRetry={handleRetry} />;
   }
 
   return null;

@@ -11,7 +11,8 @@ interface Props {
   onSetQuestions: (questions: Question[], persist: boolean) => void;
   onClearImported: () => void;
   onBackup: () => void;
-  onRestoreData: (data: { questions?: Question[]; notes?: Record<string, string> }) => void;
+  onRestoreData: (data: { questions?: Question[]; notes?: Record<string, string>; stats?: import('../types').Stats }) => void;
+  onResetStats: () => void;
   defaultConfigs: Record<Mode, SessionConfig>;
 }
 
@@ -50,6 +51,7 @@ export default function HomeScreen({
   onClearImported,
   onBackup,
   onRestoreData,
+  onResetStats,
   defaultConfigs,
 }: Props) {
   const [showDataModal, setShowDataModal] = useState(false);
@@ -128,6 +130,7 @@ export default function HomeScreen({
           onBackup={onBackup}
           onRestoreData={onRestoreData}
           onClearImported={onClearImported}
+          onResetStats={onResetStats}
         />
       )}
     </div>

@@ -121,6 +121,39 @@ export default function ConfigScreen({ mode, totalQuestions, onStart, onBack }: 
             </div>
           )}
 
+          {/* Question bias (practice only) */}
+          {mode === 'practice' && (
+            <div className="space-y-2">
+              <label className="flex justify-between text-sm font-medium text-slate-300">
+                <span>Question weighting</span>
+                <span className="text-amber-400 font-bold text-xs">
+                  {config.bias < 0.3 ? 'Reinforce strengths' : config.bias > 0.7 ? 'Target weaknesses' : 'Balanced'}
+                </span>
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={config.bias}
+                onChange={(e) => update('bias', Number(e.target.value))}
+                className="w-full accent-amber-500"
+              />
+              <div className="flex justify-between text-xs text-slate-500">
+                <span>Strengths</span>
+                <span className="text-slate-600">Balanced (0.5)</span>
+                <span>Weaknesses</span>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                {config.bias < 0.3
+                  ? 'Selects questions you typically answer correctly — good for confidence building.'
+                  : config.bias > 0.7
+                  ? 'Selects questions you typically answer incorrectly — good for targeted study.'
+                  : 'Random selection, unaffected by your answer history.'}
+              </p>
+            </div>
+          )}
+
           <button
             onClick={() => onStart(mode, config)}
             className="btn-primary w-full flex items-center justify-center gap-2 text-base py-3"
