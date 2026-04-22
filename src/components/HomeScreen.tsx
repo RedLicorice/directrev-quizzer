@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Clock, BookOpen, Layers, HardDrive, AlertTriangle, CheckCircle2, Database } from 'lucide-react';
+import { Clock, BookOpen, Layers, HardDrive, AlertTriangle, CheckCircle2, Database, History } from 'lucide-react';
 import type { Mode, SessionConfig, Question } from '../types';
 import BackupRestoreModal from './BackupRestoreModal';
 
@@ -13,6 +13,7 @@ interface Props {
   onBackup: () => void;
   onRestoreData: (data: { questions?: Question[]; notes?: Record<string, string>; stats?: import('../types').Stats }) => void;
   onResetStats: () => void;
+  onHistory: () => void;
   defaultConfigs: Record<Mode, SessionConfig>;
 }
 
@@ -52,6 +53,7 @@ export default function HomeScreen({
   onBackup,
   onRestoreData,
   onResetStats,
+  onHistory,
   defaultConfigs,
 }: Props) {
   const [showDataModal, setShowDataModal] = useState(false);
@@ -113,14 +115,23 @@ export default function HomeScreen({
         ))}
       </div>
 
-      {/* Data management button */}
-      <button
-        onClick={() => setShowDataModal(true)}
-        className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-300 transition-colors py-2"
-      >
-        {isImported ? <Database className="w-4 h-4 text-amber-500" /> : <HardDrive className="w-4 h-4" />}
-        Backup · Restore · Import
-      </button>
+      {/* Bottom action row */}
+      <div className="flex items-center gap-6">
+        <button
+          onClick={() => setShowDataModal(true)}
+          className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-300 transition-colors py-2"
+        >
+          {isImported ? <Database className="w-4 h-4 text-amber-500" /> : <HardDrive className="w-4 h-4" />}
+          Backup · Restore · Import
+        </button>
+        <button
+          onClick={onHistory}
+          className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-300 transition-colors py-2"
+        >
+          <History className="w-4 h-4" />
+          Session History
+        </button>
+      </div>
 
       {showDataModal && (
         <BackupRestoreModal

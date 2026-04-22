@@ -1,24 +1,31 @@
 import { useState, useCallback } from 'react';
-import type { Mode, SessionConfig, SessionResult, Question, Stats } from './types';
+import type { Mode, SessionConfig, SessionResult, SessionRecord, Question, Stats } from './types';
 import { DEFAULT_CONFIGS } from './types';
 import { shuffle } from './utils/shuffle';
 import { weightedSample } from './utils/weightedSample';
+import { isAnswerCorrect } from './utils/scoring';
 import HomeScreen from './components/HomeScreen';
 import ConfigScreen from './components/ConfigScreen';
 import ExamSession from './components/ExamSession';
 import PracticeSession from './components/PracticeSession';
 import FlashcardSession from './components/FlashcardSession';
 import ResultsScreen from './components/ResultsScreen';
+import SessionHistoryScreen from './components/SessionHistoryScreen';
+import SessionReviewScreen from './components/SessionReviewScreen';
 
 type Screen =
   | { name: 'home' }
   | { name: 'config'; mode: Mode }
   | { name: 'session'; mode: Mode; config: SessionConfig; questions: Question[] }
-  | { name: 'results'; result: SessionResult };
+  | { name: 'results'; result: SessionResult }
+  | { name: 'history' }
+  | { name: 'review'; record: SessionRecord };
 
 const IMPORTED_QUESTIONS_KEY = 'quizzer_imported_questions';
 const NOTES_KEY = 'quizzer_notes';
 export const STATS_KEY = 'quizzer_stats';
+export const SESSIONS_KEY = 'quizzer_sessions';
+const MAX_SESSIONS = 100;
 
 function downloadJSON(data: unknown, filename: string) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -118,6 +125,10 @@ export default function App() {
     localStorage.removeItem(STATS_KEY);
   }, []);
 
+  const handleClearHistory = useCallback(() => {
+    localStorage.removeItem(SESSIONS_KEY);
+  }, []);
+
   const handleStartSession = useCallback(
     (mode: Mode, config: SessionConfig) => {
       let qs: Question[];
@@ -134,11 +145,30 @@ export default function App() {
   );
 
   const handleSessionEnd = useCallback((result: SessionResult) => {
-    if (result.mode === 'flashcard') setScreen({ name: 'home' });
-    else setScreen({ name: 'results', result });
+    if (result.mode !== 'flashcard') {
+      // Persist session record
+      const correctCount = result.questions.filter((q, i) => isAnswerCorrect(q, result.answers[i] ?? [])).length;
+      const record: SessionRecord = {
+        id: String(Date.now()),
+        mode: result.mode,
+        date: new Date().toISOString(),
+        questions: result.questions,
+        answers: result.answers,
+        config: result.config,
+        timeElapsed: result.timeElapsed,
+        correctCount,
+      };
+      const prev = readJSON<SessionRecord[]>(SESSIONS_KEY, []);
+      const updated = [record, ...prev].slice(0, MAX_SESSIONS);
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated));
+      setScreen({ name: 'results', result });
+    } else {
+      setScreen({ name: 'home' });
+    }
   }, []);
 
   const handleHome = useCallback(() => setScreen({ name: 'home' }), []);
+  const handleHistory = useCallback(() => setScreen({ name: 'history' }), []);
   const handleRetry = useCallback((result: SessionResult) => {
     setScreen({ name: 'config', mode: result.mode });
   }, []);
@@ -155,7 +185,28 @@ export default function App() {
         onBackup={handleBackup}
         onRestoreData={handleRestoreData}
         onResetStats={handleResetStats}
+        onHistory={handleHistory}
         defaultConfigs={DEFAULT_CONFIGS}
+      />
+    );
+  }
+
+  if (screen.name === 'history') {
+    return (
+      <SessionHistoryScreen
+        sessionsKey={SESSIONS_KEY}
+        onBack={handleHome}
+        onOpen={(record) => setScreen({ name: 'review', record })}
+        onClearHistory={handleClearHistory}
+      />
+    );
+  }
+
+  if (screen.name === 'review') {
+    return (
+      <SessionReviewScreen
+        record={screen.record}
+        onBack={handleHistory}
       />
     );
   }

@@ -28,6 +28,17 @@ export interface SessionResult {
   timeElapsed: number; // seconds
 }
 
+export interface SessionRecord {
+  id: string;           // timestamp string used as unique id
+  mode: Mode;
+  date: string;         // ISO date string
+  questions: Question[];
+  answers: Record<number, number[]>;
+  config: SessionConfig;
+  timeElapsed: number;
+  correctCount: number; // pre-computed for list display
+}
+
 export interface QuestionStat {
   correct: number;
   wrong: number;
