@@ -182,31 +182,42 @@ export default function ConfigScreen({ mode, totalQuestions, seenCount, savedDra
           )}
 
           {/* Seen / unseen balance (all modes) */}
-          <div className="space-y-2">
-            <label className="flex justify-between text-sm font-medium text-slate-300">
-              <span>Seen questions</span>
-              <span className="text-amber-400 font-bold text-xs">
-                {config.seenBias < 0.15 ? 'Seen only' :
-                 config.seenBias > 0.85 ? 'Unseen only' :
-                 config.seenBias < 0.4  ? 'Mostly seen' :
-                 config.seenBias > 0.6  ? 'Mostly unseen' : 'Mixed (default)'}
-              </span>
-            </label>
-            <input
-              type="range" min={0} max={1} step={0.05}
-              value={config.seenBias}
-              onChange={(e) => update('seenBias', Number(e.target.value))}
-              className="w-full accent-amber-500"
-            />
-            <div className="flex justify-between text-xs text-slate-500">
-              <span>0% — seen only</span>
-              <span>50% — mixed</span>
-              <span>100% — unseen</span>
-            </div>
-            <p className="text-xs text-slate-500">
-              {seenCount} of {totalQuestions} questions seen · {totalQuestions - seenCount} unseen
-            </p>
-          </div>
+          {(() => {
+            const unseenFrac = config.seenBias;          // 0 = all seen, 1 = all unseen
+            const total      = config.questionCount;
+            const wantUnseen = Math.round(total * unseenFrac);
+            const wantSeen   = total - wantUnseen;
+            // Clamp to real pool sizes
+            const realUnseen = Math.min(wantUnseen, totalQuestions - seenCount);
+            const realSeen   = Math.min(wantSeen,   seenCount);
+            const shortfall  = total - realUnseen - realSeen;
+            const finalUnseen = realUnseen + Math.min(shortfall, (totalQuestions - seenCount) - realUnseen);
+            const finalSeen   = total - finalUnseen;
+            return (
+              <div className="space-y-2">
+                <label className="flex justify-between text-sm font-medium text-slate-300">
+                  <span>Seen / unseen mix</span>
+                  <span className="text-amber-400 font-bold tabular-nums text-xs">
+                    {finalSeen} seen · {finalUnseen} unseen
+                  </span>
+                </label>
+                <input
+                  type="range" min={0} max={1} step={0.05}
+                  value={config.seenBias}
+                  onChange={(e) => update('seenBias', Number(e.target.value))}
+                  className="w-full accent-amber-500"
+                />
+                <div className="flex justify-between text-xs text-slate-500">
+                  <span>All seen</span>
+                  <span>50 / 50</span>
+                  <span>All unseen</span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Pool: {seenCount} seen · {totalQuestions - seenCount} unseen available
+                </p>
+              </div>
+            );
+          })()}
 
           {/* Practice-only options */}
           {mode === 'practice' && (
