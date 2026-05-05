@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { X, Download, Upload, AlertTriangle, CheckCircle2, FileJson, FileText, Info, RotateCcw } from 'lucide-react';
+import { X, Download, Upload, AlertTriangle, CheckCircle2, FileJson, FileText, Info, RotateCcw, StickyNote } from 'lucide-react';
 import type { Question, Stats } from '../types';
 import { parseMarkdown } from '../utils/parseMarkdown';
 import { STATS_KEY } from '../App';
@@ -12,25 +12,38 @@ interface Props {
   onRestoreData: (data: { questions?: Question[]; notes?: Record<string, string>; stats?: Stats }) => void;
   onClearImported: () => void;
   onResetStats: () => void;
+  onExportNotes: () => void;
+  onImportNotes: (text: string) => { matched: number; total: number };
+  isNotesMarkdown: (text: string) => boolean;
 }
 
 type ParsedFile =
   | { kind: 'backup'; questions: Question[] | null; notes: Record<string, string> | null; stats: Stats | null; filename: string }
   | { kind: 'questions'; questions: Question[]; filename: string }
+  | { kind: 'notes-import'; matched: number; total: number; filename: string }
   | { kind: 'error'; message: string; filename: string };
 
 type ConfirmStage = 'idle' | 'confirming';
 
-function parseFile(text: string, filename: string): ParsedFile {
+function parseFile(
+  text: string,
+  filename: string,
+  isNotesMarkdownFn: (t: string) => boolean,
+  importNotesFn: (t: string) => { matched: number; total: number },
+): ParsedFile {
   if (filename.toLowerCase().endsWith('.md')) {
+    // Check if it's a notes export first
+    if (isNotesMarkdownFn(text)) {
+      const result = importNotesFn(text);
+      return { kind: 'notes-import', ...result, filename };
+    }
     const questions = parseMarkdown(text);
     if (questions.length === 0)
-      return { kind: 'error', message: 'No questions found — ensure it is a Ditectrev README.md', filename };
+      return { kind: 'error', message: 'No questions found — ensure it is a Ditectrev README.md or a Quizzer notes export', filename };
     return { kind: 'questions', questions, filename };
   }
   try {
     const json = JSON.parse(text) as Record<string, unknown>;
-    // v1 or v2 backup
     if ((json.version === 1 || json.version === 2) && (json.questions != null || json.notes != null || json.stats != null)) {
       return {
         kind: 'backup',
@@ -62,7 +75,10 @@ function countStats(): number {
   catch { return 0; }
 }
 
-export default function BackupRestoreModal({ currentQuestionCount, isImported, onClose, onBackup, onRestoreData, onClearImported, onResetStats }: Props) {
+export default function BackupRestoreModal({
+  currentQuestionCount, isImported, onClose, onBackup, onRestoreData,
+  onClearImported, onResetStats, onExportNotes, onImportNotes, isNotesMarkdown,
+}: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsed, setParsed] = useState<ParsedFile | null>(null);
   const [restoreQ, setRestoreQ] = useState(true);
@@ -80,7 +96,8 @@ export default function BackupRestoreModal({ currentQuestionCount, isImported, o
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const result = parseFile(ev.target?.result as string, file.name);
+      const text = ev.target?.result as string;
+      const result = parseFile(text, file.name, isNotesMarkdown, onImportNotes);
       setParsed(result);
       if (result.kind === 'backup') {
         setRestoreQ(result.questions !== null);
@@ -95,7 +112,7 @@ export default function BackupRestoreModal({ currentQuestionCount, isImported, o
     e.target.value = '';
   }
 
-  const availableQ = (): Question[] | null => (!parsed || parsed.kind === 'error') ? null : parsed.questions ?? null;
+  const availableQ = (): Question[] | null => (!parsed || parsed.kind === 'error' || parsed.kind === 'notes-import') ? null : parsed.questions ?? null;
   const availableN = (): Record<string, string> | null => (parsed?.kind === 'backup' ? parsed.notes : null) ?? null;
   const availableS = (): Stats | null => (parsed?.kind === 'backup' ? parsed.stats : null) ?? null;
 
@@ -118,7 +135,6 @@ export default function BackupRestoreModal({ currentQuestionCount, isImported, o
     onClose();
   }
 
-  // Reusable checkbox row
   function CheckboxRow({ label, detail, available, checked, onToggle }: {
     label: string; detail: string; available: boolean; checked: boolean; onToggle: (v: boolean) => void;
   }) {
@@ -150,20 +166,32 @@ export default function BackupRestoreModal({ currentQuestionCount, isImported, o
           {/* ── Backup ── */}
           <section>
             <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Backup</p>
-            <div className="flex items-start justify-between gap-4 p-4 rounded-xl bg-slate-700/30 border border-slate-700/50">
-              <div className="text-sm text-slate-400">
-                Export questions, notes and stats to a single JSON file.
-                <div className="flex gap-3 mt-1 text-xs text-slate-500">
-                  <span>{currentQuestionCount} questions</span>
-                  <span>·</span>
-                  <span>{notes} note{notes !== 1 ? 's' : ''}</span>
-                  <span>·</span>
-                  <span>{statsCount} stat record{statsCount !== 1 ? 's' : ''}</span>
+            <div className="space-y-2.5">
+              <div className="flex items-start justify-between gap-4 p-4 rounded-xl bg-slate-700/30 border border-slate-700/50">
+                <div className="text-sm text-slate-400">
+                  Export questions, notes and stats to a single JSON file.
+                  <div className="flex gap-3 mt-1 text-xs text-slate-500">
+                    <span>{currentQuestionCount} questions</span>
+                    <span>·</span>
+                    <span>{notes} note{notes !== 1 ? 's' : ''}</span>
+                    <span>·</span>
+                    <span>{statsCount} stat record{statsCount !== 1 ? 's' : ''}</span>
+                  </div>
                 </div>
+                <button onClick={onBackup} className="btn-secondary flex items-center gap-2 whitespace-nowrap shrink-0 text-sm">
+                  <Download className="w-4 h-4" /> Download
+                </button>
               </div>
-              <button onClick={onBackup} className="btn-secondary flex items-center gap-2 whitespace-nowrap shrink-0 text-sm">
-                <Download className="w-4 h-4" /> Download
-              </button>
+
+              <div className="flex items-start justify-between gap-4 p-4 rounded-xl bg-slate-700/30 border border-slate-700/50">
+                <div className="text-sm text-slate-400">
+                  Export notes only as Markdown.
+                  <div className="text-xs text-slate-500 mt-1">{notes} note{notes !== 1 ? 's' : ''} · matched by question hash on import</div>
+                </div>
+                <button onClick={onExportNotes} disabled={notes === 0} className="btn-secondary flex items-center gap-2 whitespace-nowrap shrink-0 text-sm disabled:opacity-40">
+                  <StickyNote className="w-4 h-4" /> Notes .md
+                </button>
+              </div>
             </div>
           </section>
 
@@ -171,7 +199,6 @@ export default function BackupRestoreModal({ currentQuestionCount, isImported, o
           <section>
             <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Danger Zone</p>
             <div className="space-y-2.5">
-              {/* Revert imported questions */}
               {isImported && (
                 <div className="flex items-center justify-between gap-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
                   <div className="flex items-center gap-2.5 text-sm text-amber-300">
@@ -192,7 +219,6 @@ export default function BackupRestoreModal({ currentQuestionCount, isImported, o
                 </div>
               )}
 
-              {/* Reset stats */}
               <div className="flex items-center justify-between gap-4 p-3 rounded-xl bg-slate-700/30 border border-slate-700/50">
                 <div className="text-sm text-slate-400">
                   Answer history ({statsCount} questions tracked)
@@ -232,6 +258,16 @@ export default function BackupRestoreModal({ currentQuestionCount, isImported, o
                 {parsed.kind === 'error' ? (
                   <div className="flex items-start gap-2.5 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm">
                     <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {parsed.message}
+                  </div>
+                ) : parsed.kind === 'notes-import' ? (
+                  <div className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium">Notes imported</p>
+                      <p className="text-xs text-emerald-400/70 mt-0.5">
+                        {parsed.matched} of {parsed.total} notes matched to current questions
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   <>

@@ -1,9 +1,9 @@
-import { useState, useCallback } from 'react';
-import { X, ChevronLeft, ChevronRight, StickyNote, CheckCircle2, XCircle, ChevronDown, ChevronUp, LayoutList, Pause, Play } from 'lucide-react';
-import type { Question, SessionConfig, SessionResult, Stats } from '../types';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { X, ChevronLeft, ChevronRight, StickyNote, CheckCircle2, XCircle, ChevronDown, ChevronUp, LayoutList, Pause, Play, Download } from 'lucide-react';
+import type { Question, SessionConfig, SessionResult, Stats, PracticeSessionDraft, PracticeSessionExport } from '../types';
 import { isAnswerCorrect } from '../utils/scoring';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { STATS_KEY } from '../App';
+import { STATS_KEY, PRACTICE_DRAFT_KEY } from '../App';
 import SummaryModal from './SummaryModal';
 import type { QuestionStatus } from './SummaryModal';
 import ReactMarkdown from 'react-markdown';
@@ -11,21 +11,40 @@ import ReactMarkdown from 'react-markdown';
 interface Props {
   questions: Question[];
   config: SessionConfig;
+  initialDraft?: PracticeSessionDraft;
   onFinish: (result: SessionResult) => void;
   onExit: () => void;
 }
 
-export default function PracticeSession({ questions, config, onFinish, onExit }: Props) {
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, number[]>>({});
-  const [revealed, setRevealed] = useState<Set<number>>(new Set());
+function downloadJSON(data: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function QuestionImage({ src }: { src: string }) {
+  return (
+    <div className="mt-4">
+      <img src={src} alt="Question diagram" className="max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />
+    </div>
+  );
+}
+
+export default function PracticeSession({ questions, config, initialDraft, onFinish, onExit }: Props) {
+  const [currentIdx, setCurrentIdx] = useState(() => initialDraft?.currentIdx ?? 0);
+  const [answers, setAnswers] = useState<Record<number, number[]>>(() => initialDraft?.answers ?? {});
+  const [revealed, setRevealed] = useState<Set<number>>(() => new Set(initialDraft?.revealed ?? []));
   const [notesOpen, setNotesOpen] = useState(false);
   const [paused, setPaused] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [notes, setNotes] = useLocalStorage<Record<string, string>>('quizzer_notes', {});
   const [stats, setStats] = useLocalStorage<Stats>(STATS_KEY, {});
-  const [startTime] = useState(Date.now);
+  const [startTime] = useState(() => initialDraft?.startTime ?? Date.now());
+  const draftIdRef = useRef(initialDraft?.id ?? String(Date.now()));
 
   const q = questions[currentIdx];
   const selected = answers[currentIdx] ?? [];
@@ -34,6 +53,22 @@ export default function PracticeSession({ questions, config, onFinish, onExit }:
 
   const correct = Array.from(revealed).filter((idx) => isAnswerCorrect(questions[idx], answers[idx] ?? [])).length;
   const wrong = revealed.size - correct;
+
+  // Auto-save draft whenever answer state changes
+  useEffect(() => {
+    if (revealed.size === 0 && Object.keys(answers).length === 0) return;
+    const draft: PracticeSessionDraft = {
+      id: draftIdRef.current,
+      savedAt: new Date().toISOString(),
+      questionIds: questions.map((q) => q.id),
+      config,
+      currentIdx,
+      answers,
+      revealed: Array.from(revealed),
+      startTime,
+    };
+    localStorage.setItem(PRACTICE_DRAFT_KEY, JSON.stringify(draft));
+  }, [answers, revealed, currentIdx, questions, config, startTime]);
 
   const toggleOption = useCallback(
     (optIdx: number) => {
@@ -52,7 +87,6 @@ export default function PracticeSession({ questions, config, onFinish, onExit }:
     if (!selected.length) return;
     const wasCorrect = isAnswerCorrect(q, selected);
     setRevealed((r) => new Set([...r, currentIdx]));
-    // Update lifetime stats
     setStats((s) => {
       const key = String(q.id);
       const prev = s[key] ?? { correct: 0, wrong: 0 };
@@ -75,7 +109,23 @@ export default function PracticeSession({ questions, config, onFinish, onExit }:
   }
 
   function handleFinish() {
+    localStorage.removeItem(PRACTICE_DRAFT_KEY);
     onFinish({ mode: 'practice', questions, answers, config, timeElapsed: Math.round((Date.now() - startTime) / 1000) });
+  }
+
+  function handleExportSession() {
+    const exp: PracticeSessionExport = {
+      version: 1,
+      type: 'practice-session',
+      exportedAt: new Date().toISOString(),
+      questions,
+      config,
+      currentIdx,
+      answers,
+      revealed: Array.from(revealed),
+      startTime,
+    };
+    downloadJSON(exp, `quizzer-session-${new Date().toISOString().slice(0, 10)}.json`);
   }
 
   function getOptionClass(i: number): string {
@@ -131,6 +181,9 @@ export default function PracticeSession({ questions, config, onFinish, onExit }:
           <button onClick={() => setShowSummary(true)} className="btn-ghost p-2" title="Summary">
             <LayoutList className="w-5 h-5" />
           </button>
+          <button onClick={handleExportSession} className="btn-ghost p-2" title="Export session">
+            <Download className="w-4 h-4" />
+          </button>
           <button onClick={handleFinish} className="text-xs text-slate-500 hover:text-slate-300 transition-colors shrink-0">
             Finish
           </button>
@@ -158,6 +211,7 @@ export default function PracticeSession({ questions, config, onFinish, onExit }:
               <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">Select {q.selectCount} answers</p>
             )}
             <p className="text-slate-100 text-base sm:text-lg leading-relaxed">{q.text}</p>
+            {q.image && <QuestionImage src={q.image} />}
           </div>
 
           <div className="space-y-2.5">
@@ -168,14 +222,22 @@ export default function PracticeSession({ questions, config, onFinish, onExit }:
                 disabled={isRevealed}
                 className={`w-full text-left px-5 py-4 rounded-xl border transition-all duration-150 ${getOptionClass(i)}`}
               >
-                <span className={`inline-flex items-center justify-center w-6 h-6 rounded mr-3 text-xs font-bold shrink-0
-                  ${selected.includes(i) && !isRevealed ? 'bg-blue-500 text-white' :
-                    opt.correct && isRevealed ? 'bg-emerald-500 text-white' :
-                    selected.includes(i) && isRevealed ? 'bg-rose-500 text-white' :
-                    'bg-slate-700 text-slate-400'}`}>
-                  {String.fromCharCode(65 + i)}
-                </span>
-                {opt.text}
+                <div className="flex items-start gap-3">
+                  <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold shrink-0 mt-0.5
+                    ${selected.includes(i) && !isRevealed ? 'bg-blue-500 text-white' :
+                      opt.correct && isRevealed ? 'bg-emerald-500 text-white' :
+                      selected.includes(i) && isRevealed ? 'bg-rose-500 text-white' :
+                      'bg-slate-700 text-slate-400'}`}>
+                    {String.fromCharCode(65 + i)}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <span>{opt.text}</span>
+                    {opt.image && (
+                      <img src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
+                        className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />
+                    )}
+                  </div>
+                </div>
               </button>
             ))}
           </div>
@@ -261,10 +323,10 @@ export default function PracticeSession({ questions, config, onFinish, onExit }:
               <h2 className="text-lg font-semibold">Exit Practice?</h2>
               <button onClick={() => setShowExitConfirm(false)} className="btn-ghost p-1"><X className="w-4 h-4" /></button>
             </div>
-            <p className="text-slate-400 text-sm mb-6">Your progress will be lost. Notes are already saved.</p>
+            <p className="text-slate-400 text-sm mb-6">Your progress is auto-saved and can be resumed later. Notes are already saved.</p>
             <div className="flex gap-3">
               <button onClick={() => setShowExitConfirm(false)} className="btn-secondary flex-1">Continue</button>
-              <button onClick={onExit} className="btn-primary flex-1">Exit</button>
+              <button onClick={onExit} className="btn-primary flex-1">Exit &amp; Save</button>
             </div>
           </div>
         </div>

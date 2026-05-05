@@ -1,6 +1,7 @@
 export interface Option {
   text: string;
   correct: boolean;
+  image?: string; // base64 data URL
 }
 
 export interface Question {
@@ -8,6 +9,7 @@ export interface Question {
   text: string;
   options: Option[];
   selectCount: number;
+  image?: string; // base64 data URL
 }
 
 export type Mode = 'exam' | 'practice' | 'flashcard';
@@ -18,6 +20,7 @@ export interface SessionConfig {
   questionCount: number;
   shuffle: boolean;
   bias: number;         // 0.0 = favour mastered, 0.5 = balanced, 1.0 = favour struggling (practice only)
+  weakMode: boolean;    // only pick questions with success rate < 60% or unseen (practice only)
 }
 
 export interface SessionResult {
@@ -47,8 +50,32 @@ export interface QuestionStat {
 // Keyed by String(question.id)
 export type Stats = Record<string, QuestionStat>;
 
+export interface PracticeSessionDraft {
+  id: string;
+  savedAt: string;
+  questionIds: number[]; // ordered IDs of questions in this session
+  config: SessionConfig;
+  currentIdx: number;
+  answers: Record<number, number[]>;
+  revealed: number[]; // array form of Set<number>
+  startTime: number;  // ms timestamp
+}
+
+// Full exportable session (includes question data for portability)
+export interface PracticeSessionExport {
+  version: 1;
+  type: 'practice-session';
+  exportedAt: string;
+  questions: Question[];
+  config: SessionConfig;
+  currentIdx: number;
+  answers: Record<number, number[]>;
+  revealed: number[];
+  startTime: number;
+}
+
 export const DEFAULT_CONFIGS: Record<Mode, SessionConfig> = {
-  exam:      { timeLimit: 130, passingScore: 72, questionCount: 65, shuffle: true,  bias: 0.5 },
-  practice:  { timeLimit: 0,   passingScore: 72, questionCount: 65, shuffle: true,  bias: 0.5 },
-  flashcard: { timeLimit: 0,   passingScore: 0,  questionCount: 50, shuffle: true,  bias: 0.5 },
+  exam:      { timeLimit: 130, passingScore: 72, questionCount: 65, shuffle: true,  bias: 0.5, weakMode: false },
+  practice:  { timeLimit: 0,   passingScore: 72, questionCount: 65, shuffle: true,  bias: 0.5, weakMode: false },
+  flashcard: { timeLimit: 0,   passingScore: 0,  questionCount: 50, shuffle: true,  bias: 0.5, weakMode: false },
 };

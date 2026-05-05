@@ -97,6 +97,11 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
               <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">Select {q.selectCount} answers</p>
             )}
             <p className="text-slate-100 text-base sm:text-lg leading-relaxed">{q.text}</p>
+            {q.image && (
+              <div className="mt-4">
+                <img src={q.image} alt="Question diagram" className="max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />
+              </div>
+            )}
           </div>
 
           <div className="space-y-2.5">
@@ -110,11 +115,19 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
                     ${isSelected ? 'bg-blue-500/20 border-blue-500 text-blue-200'
                       : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-700/40'}`}
                 >
-                  <span className={`inline-flex items-center justify-center w-6 h-6 rounded mr-3 text-xs font-bold shrink-0
-                    ${isSelected ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-400'}`}>
-                    {String.fromCharCode(65 + i)}
-                  </span>
-                  {opt.text}
+                  <div className="flex items-start gap-3">
+                    <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold shrink-0 mt-0.5
+                      ${isSelected ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-400'}`}>
+                      {String.fromCharCode(65 + i)}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <span>{opt.text}</span>
+                      {opt.image && (
+                        <img src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
+                          className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />
+                      )}
+                    </div>
+                  </div>
                 </button>
               );
             })}

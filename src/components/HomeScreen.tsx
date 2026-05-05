@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Clock, BookOpen, Layers, HardDrive, AlertTriangle, CheckCircle2, Database, History } from 'lucide-react';
+import { Clock, BookOpen, Layers, HardDrive, AlertTriangle, CheckCircle2, Database, History, BarChart2 } from 'lucide-react';
 import type { Mode, SessionConfig, Question } from '../types';
 import BackupRestoreModal from './BackupRestoreModal';
 
@@ -14,6 +14,10 @@ interface Props {
   onRestoreData: (data: { questions?: Question[]; notes?: Record<string, string>; stats?: import('../types').Stats }) => void;
   onResetStats: () => void;
   onHistory: () => void;
+  onDataset: () => void;
+  onExportNotes: () => void;
+  onImportNotes: (text: string) => { matched: number; total: number };
+  isNotesMarkdown: (text: string) => boolean;
   defaultConfigs: Record<Mode, SessionConfig>;
 }
 
@@ -54,6 +58,10 @@ export default function HomeScreen({
   onRestoreData,
   onResetStats,
   onHistory,
+  onDataset,
+  onExportNotes,
+  onImportNotes,
+  isNotesMarkdown,
   defaultConfigs,
 }: Props) {
   const [showDataModal, setShowDataModal] = useState(false);
@@ -116,7 +124,7 @@ export default function HomeScreen({
       </div>
 
       {/* Bottom action row */}
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-6 flex-wrap justify-center">
         <button
           onClick={() => setShowDataModal(true)}
           className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-300 transition-colors py-2"
@@ -131,6 +139,14 @@ export default function HomeScreen({
           <History className="w-4 h-4" />
           Session History
         </button>
+        <button
+          onClick={onDataset}
+          disabled={questionCount === 0}
+          className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-300 transition-colors py-2 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <BarChart2 className="w-4 h-4" />
+          Dataset
+        </button>
       </div>
 
       {showDataModal && (
@@ -142,6 +158,9 @@ export default function HomeScreen({
           onRestoreData={onRestoreData}
           onClearImported={onClearImported}
           onResetStats={onResetStats}
+          onExportNotes={onExportNotes}
+          onImportNotes={onImportNotes}
+          isNotesMarkdown={isNotesMarkdown}
         />
       )}
     </div>

@@ -36,8 +36,8 @@ export default function FlashcardSession({ questions, onExit }: Props) {
     return () => window.removeEventListener('keydown', handler);
   }, [currentIdx, questions.length]);
 
-  // Need enough height for all options; use min-h instead of fixed h
-  const cardHeight = Math.max(360, 100 + q.options.length * 56);
+  const hasOptionImages = q.options.some((o) => o.image);
+  const cardHeight = Math.max(360, 100 + q.options.length * (hasOptionImages ? 120 : 56) + (q.image ? 200 : 0));
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -87,6 +87,9 @@ export default function FlashcardSession({ questions, onExit }: Props) {
               <p className="text-slate-100 text-base sm:text-xl text-center leading-relaxed font-medium">
                 {q.text}
               </p>
+              {q.image && (
+                <img src={q.image} alt="Question diagram" className="mt-4 max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '300px' }} />
+              )}
             </div>
 
             {/* Back — all options with correct/wrong styling */}
@@ -108,7 +111,13 @@ export default function FlashcardSession({ questions, onExit }: Props) {
                     <span className={`mt-0.5 shrink-0 font-bold text-xs ${opt.correct ? 'text-emerald-400' : 'text-slate-600'}`}>
                       {opt.correct ? '✓' : '✗'}
                     </span>
-                    <span>{opt.text}</span>
+                    <div className="flex-1 min-w-0">
+                      <span>{opt.text}</span>
+                      {opt.image && (
+                        <img src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
+                          className="mt-1.5 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '200px' }} />
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
