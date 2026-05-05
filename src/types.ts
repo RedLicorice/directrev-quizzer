@@ -21,6 +21,7 @@ export interface SessionConfig {
   shuffle: boolean;
   bias: number;         // 0.0 = favour mastered, 0.5 = balanced, 1.0 = favour struggling (practice only)
   weakMode: boolean;    // only pick questions with success rate < 60% or unseen (practice only)
+  seenBias: number;     // 0.0 = seen only, 0.5 = mixed (default), 1.0 = unseen only (all modes)
 }
 
 export interface SessionResult {
@@ -75,7 +76,7 @@ export interface PracticeSessionExport {
 }
 
 export const DEFAULT_CONFIGS: Record<Mode, SessionConfig> = {
-  exam:      { timeLimit: 130, passingScore: 72, questionCount: 65, shuffle: true,  bias: 0.5, weakMode: false },
-  practice:  { timeLimit: 0,   passingScore: 72, questionCount: 65, shuffle: true,  bias: 0.5, weakMode: false },
-  flashcard: { timeLimit: 0,   passingScore: 0,  questionCount: 50, shuffle: true,  bias: 0.5, weakMode: false },
+  exam:      { timeLimit: 130, passingScore: 72, questionCount: 65, shuffle: true,  bias: 0.5, weakMode: false, seenBias: 0.5 },
+  practice:  { timeLimit: 0,   passingScore: 72, questionCount: 65, shuffle: true,  bias: 0.5, weakMode: false, seenBias: 0.5 },
+  flashcard: { timeLimit: 0,   passingScore: 0,  questionCount: 50, shuffle: true,  bias: 0.5, weakMode: false, seenBias: 0.5 },
 };

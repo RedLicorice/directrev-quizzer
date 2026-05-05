@@ -161,23 +161,34 @@ export default function App() {
 
   const handleStartSession = useCallback(
     (mode: Mode, config: SessionConfig) => {
-      let qs: Question[];
       const stats = readJSON<Stats>(STATS_KEY, {});
 
+      // Pre-filter pool for weak mode (practice only)
+      let pool = allQuestions;
       if (mode === 'practice' && config.weakMode) {
-        const pool = allQuestions.filter((q) => {
+        const weak = allQuestions.filter((q) => {
           const s = stats[String(q.id)];
           if (!s || s.correct + s.wrong === 0) return true;
           return s.correct / (s.correct + s.wrong) < 0.6;
         });
-        const source = pool.length > 0 ? pool : allQuestions;
-        qs = weightedSample(source, stats, 1.0, config.questionCount);
-      } else if (mode === 'practice' && config.bias !== 0.5) {
-        qs = weightedSample(allQuestions, stats, config.bias, config.questionCount);
+        pool = weak.length > 0 ? weak : allQuestions;
+      }
+
+      // Effective per-answer bias (practice only; weak mode forces 1.0)
+      const effectiveBias = mode === 'practice'
+        ? (config.weakMode ? 1.0 : config.bias)
+        : 0.5;
+
+      const { seenBias } = config;
+      let qs: Question[];
+
+      if (seenBias !== 0.5 || effectiveBias !== 0.5) {
+        qs = weightedSample(pool, stats, effectiveBias, seenBias, config.questionCount);
       } else {
-        qs = config.shuffle ? shuffle(allQuestions) : allQuestions.slice();
+        qs = config.shuffle ? shuffle(pool) : pool.slice();
         qs = qs.slice(0, config.questionCount);
       }
+
       setScreen({ name: 'session', mode, config, questions: qs });
     },
     [allQuestions],
@@ -309,10 +320,16 @@ export default function App() {
 
   if (screen.name === 'config') {
     const draft = readJSON<PracticeSessionDraft | null>(PRACTICE_DRAFT_KEY, null);
+    const stats = readJSON<Stats>(STATS_KEY, {});
+    const seenCount = allQuestions.filter((q) => {
+      const s = stats[String(q.id)];
+      return s && s.correct + s.wrong > 0;
+    }).length;
     return (
       <ConfigScreen
         mode={screen.mode}
         totalQuestions={allQuestions.length}
+        seenCount={seenCount}
         savedDraft={screen.mode === 'practice' ? draft : null}
         onStart={handleStartSession}
         onResume={handleResumePractice}

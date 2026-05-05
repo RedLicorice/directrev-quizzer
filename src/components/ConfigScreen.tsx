@@ -6,6 +6,7 @@ import { DEFAULT_CONFIGS } from '../types';
 interface Props {
   mode: Mode;
   totalQuestions: number;
+  seenCount: number;
   savedDraft: PracticeSessionDraft | null;
   onStart: (mode: Mode, config: SessionConfig) => void;
   onResume: (draft: PracticeSessionDraft) => void;
@@ -19,7 +20,7 @@ const LABELS: Record<Mode, { title: string; color: string }> = {
   flashcard: { title: 'Flashcard Mode', color: 'text-blue-400' },
 };
 
-export default function ConfigScreen({ mode, totalQuestions, savedDraft, onStart, onResume, onImportSession, onBack }: Props) {
+export default function ConfigScreen({ mode, totalQuestions, seenCount, savedDraft, onStart, onResume, onImportSession, onBack }: Props) {
   const [config, setConfig] = useState<SessionConfig>({ ...DEFAULT_CONFIGS[mode] });
   const [importError, setImportError] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -121,7 +122,7 @@ export default function ConfigScreen({ mode, totalQuestions, savedDraft, onStart
           {/* Shuffle */}
           <label className="flex items-center justify-between cursor-pointer">
             <div>
-              <p className="text-sm font-medium text-slate-300">Shuffle questions</p>
+              <p className="text-sm font-medium text-slate-300">{mode === 'flashcard' ? 'Randomize order' : 'Shuffle questions'}</p>
               <p className="text-xs text-slate-500">Randomize order each session</p>
             </div>
             <button
@@ -179,6 +180,33 @@ export default function ConfigScreen({ mode, totalQuestions, savedDraft, onStart
               </div>
             </div>
           )}
+
+          {/* Seen / unseen balance (all modes) */}
+          <div className="space-y-2">
+            <label className="flex justify-between text-sm font-medium text-slate-300">
+              <span>Seen questions</span>
+              <span className="text-amber-400 font-bold text-xs">
+                {config.seenBias < 0.15 ? 'Seen only' :
+                 config.seenBias > 0.85 ? 'Unseen only' :
+                 config.seenBias < 0.4  ? 'Mostly seen' :
+                 config.seenBias > 0.6  ? 'Mostly unseen' : 'Mixed (default)'}
+              </span>
+            </label>
+            <input
+              type="range" min={0} max={1} step={0.05}
+              value={config.seenBias}
+              onChange={(e) => update('seenBias', Number(e.target.value))}
+              className="w-full accent-amber-500"
+            />
+            <div className="flex justify-between text-xs text-slate-500">
+              <span>0% — seen only</span>
+              <span>50% — mixed</span>
+              <span>100% — unseen</span>
+            </div>
+            <p className="text-xs text-slate-500">
+              {seenCount} of {totalQuestions} questions seen · {totalQuestions - seenCount} unseen
+            </p>
+          </div>
 
           {/* Practice-only options */}
           {mode === 'practice' && (
