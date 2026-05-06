@@ -4,6 +4,7 @@ import type { Question, SessionConfig, SessionResult } from '../types';
 import { useTimer, formatSeconds } from '../hooks/useTimer';
 import SummaryModal from './SummaryModal';
 import type { QuestionStatus } from './SummaryModal';
+import { QuestionMarkdown, InlineText } from './MarkdownText';
 
 interface Props {
   questions: Question[];
@@ -34,7 +35,9 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
       setAnswers((prev) => {
         const cur = prev[currentIdx] ?? [];
         if (q.selectCount === 1) return { ...prev, [currentIdx]: [optIdx] };
-        const next = cur.includes(optIdx) ? cur.filter((i) => i !== optIdx) : [...cur, optIdx];
+        const isSelected = cur.includes(optIdx);
+        if (!isSelected && cur.length >= q.selectCount) return prev;
+        const next = isSelected ? cur.filter((i) => i !== optIdx) : [...cur, optIdx];
         return { ...prev, [currentIdx]: next };
       });
     },
@@ -94,9 +97,16 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
         <div className="w-full max-w-3xl space-y-5 animate-slide-up" key={currentIdx}>
           <div className="card p-6 sm:p-8">
             {q.selectCount > 1 && (
-              <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">Select {q.selectCount} answers</p>
+              <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">
+                Select {q.selectCount} answers
+                {selected.length > 0 && (
+                  <span className="ml-2 text-slate-500 normal-case font-normal">({selected.length}/{q.selectCount})</span>
+                )}
+              </p>
             )}
-            <p className="text-slate-100 text-base sm:text-lg leading-relaxed">{q.text}</p>
+            <p className="text-slate-100 text-base sm:text-lg leading-relaxed">
+              <QuestionMarkdown text={q.text} />
+            </p>
             {q.image && (
               <div className="mt-4">
                 <img src={q.image} alt="Question diagram" className="max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />
@@ -121,7 +131,7 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
                       {String.fromCharCode(65 + i)}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <span>{opt.text}</span>
+                      <InlineText text={opt.text} />
                       {opt.image && (
                         <img src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
                           className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />

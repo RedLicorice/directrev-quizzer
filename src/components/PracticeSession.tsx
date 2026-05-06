@@ -7,6 +7,7 @@ import { STATS_KEY, PRACTICE_DRAFT_KEY } from '../App';
 import SummaryModal from './SummaryModal';
 import type { QuestionStatus } from './SummaryModal';
 import ReactMarkdown from 'react-markdown';
+import { QuestionMarkdown, InlineText } from './MarkdownText';
 
 interface Props {
   questions: Question[];
@@ -76,7 +77,10 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
       setAnswers((prev) => {
         const cur = prev[currentIdx] ?? [];
         if (q.selectCount === 1) return { ...prev, [currentIdx]: [optIdx] };
-        const next = cur.includes(optIdx) ? cur.filter((i) => i !== optIdx) : [...cur, optIdx];
+        const isSelected = cur.includes(optIdx);
+        // Don't allow selecting more than the required count
+        if (!isSelected && cur.length >= q.selectCount) return prev;
+        const next = isSelected ? cur.filter((i) => i !== optIdx) : [...cur, optIdx];
         return { ...prev, [currentIdx]: next };
       });
     },
@@ -208,9 +212,18 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
 
           <div className="card p-6 sm:p-8">
             {q.selectCount > 1 && (
-              <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">Select {q.selectCount} answers</p>
+              <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">
+                Select {q.selectCount} answers
+                {!isRevealed && selected.length > 0 && (
+                  <span className="ml-2 text-slate-500 normal-case font-normal">
+                    ({selected.length}/{q.selectCount} selected)
+                  </span>
+                )}
+              </p>
             )}
-            <p className="text-slate-100 text-base sm:text-lg leading-relaxed">{q.text}</p>
+            <p className="text-slate-100 text-base sm:text-lg leading-relaxed">
+              <QuestionMarkdown text={q.text} />
+            </p>
             {q.image && <QuestionImage src={q.image} />}
           </div>
 
@@ -231,7 +244,7 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
                     {String.fromCharCode(65 + i)}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <span>{opt.text}</span>
+                    <InlineText text={opt.text} />
                     {opt.image && (
                       <img src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
                         className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />
@@ -280,8 +293,15 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
           </button>
           <div className="flex-1" />
           {!isRevealed ? (
-            <button onClick={handleCheck} disabled={!selected.length} className="btn-primary flex items-center gap-2 px-6">
-              Check Answer
+            <button
+              onClick={handleCheck}
+              disabled={selected.length !== q.selectCount}
+              className="btn-primary flex items-center gap-2 px-6 disabled:opacity-40"
+              title={selected.length !== q.selectCount ? `Select ${q.selectCount - selected.length} more answer${q.selectCount - selected.length !== 1 ? 's' : ''}` : undefined}
+            >
+              {q.selectCount > 1 && selected.length < q.selectCount
+                ? `Select ${q.selectCount - selected.length} more`
+                : 'Check Answer'}
             </button>
           ) : (
             <button onClick={handleNext} className="btn-primary flex items-center gap-2 px-6">

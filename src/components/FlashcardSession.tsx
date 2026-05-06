@@ -3,6 +3,7 @@ import { X, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import type { Question } from '../types';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ReactMarkdown from 'react-markdown';
+import { QuestionMarkdown, InlineText } from './MarkdownText';
 
 interface Props {
   questions: Question[];
@@ -85,7 +86,7 @@ export default function FlashcardSession({ questions, onExit }: Props) {
                 </span>
               )}
               <p className="text-slate-100 text-base sm:text-xl text-center leading-relaxed font-medium">
-                {q.text}
+                <QuestionMarkdown text={q.text} />
               </p>
               {q.image && (
                 <img src={q.image} alt="Question diagram" className="mt-4 max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '300px' }} />
@@ -112,7 +113,7 @@ export default function FlashcardSession({ questions, onExit }: Props) {
                       {opt.correct ? '✓' : '✗'}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <span>{opt.text}</span>
+                      <InlineText text={opt.text} />
                       {opt.image && (
                         <img src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
                           className="mt-1.5 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '200px' }} />
