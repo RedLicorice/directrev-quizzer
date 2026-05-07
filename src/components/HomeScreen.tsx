@@ -17,7 +17,10 @@ interface Props {
   onDataset: () => void;
   onExportNotes: () => void;
   onImportNotes: (text: string) => { matched: number; total: number };
+  onExportStats: () => void;
+  onImportStats: (text: string) => { matched: number; total: number };
   isNotesMarkdown: (text: string) => boolean;
+  isStatsMarkdown: (text: string) => boolean;
   defaultConfigs: Record<Mode, SessionConfig>;
 }
 
@@ -61,7 +64,10 @@ export default function HomeScreen({
   onDataset,
   onExportNotes,
   onImportNotes,
+  onExportStats,
+  onImportStats,
   isNotesMarkdown,
+  isStatsMarkdown,
   defaultConfigs,
 }: Props) {
   const [showDataModal, setShowDataModal] = useState(false);
@@ -160,7 +166,10 @@ export default function HomeScreen({
           onResetStats={onResetStats}
           onExportNotes={onExportNotes}
           onImportNotes={onImportNotes}
+          onExportStats={onExportStats}
+          onImportStats={onImportStats}
           isNotesMarkdown={isNotesMarkdown}
+          isStatsMarkdown={isStatsMarkdown}
         />
       )}
     </div>

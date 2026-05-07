@@ -4,7 +4,7 @@ import { DEFAULT_CONFIGS } from './types';
 import { shuffle } from './utils/shuffle';
 import { weightedSample } from './utils/weightedSample';
 import { isAnswerCorrect } from './utils/scoring';
-import { exportNotesMarkdown, importNotesMarkdown, isNotesMarkdown } from './utils/notesMarkdown';
+import { exportNotesMarkdown, importNotesMarkdown, isNotesMarkdown, exportStatsMarkdown, importStatsMarkdown, isStatsMarkdown } from './utils/notesMarkdown';
 import HomeScreen from './components/HomeScreen';
 import ConfigScreen from './components/ConfigScreen';
 import ExamSession from './components/ExamSession';
@@ -125,6 +125,21 @@ export default function App() {
     const { notes, matched, total } = importNotesMarkdown(text, allQuestions);
     const merged = { ...existing, ...notes };
     localStorage.setItem(NOTES_KEY, JSON.stringify(merged));
+    return { matched, total };
+  }, [allQuestions]);
+
+  const handleExportStats = useCallback(() => {
+    const stats = readJSON<Stats>(STATS_KEY, {});
+    const md = exportStatsMarkdown(allQuestions, stats);
+    downloadBlob(md, `quizzer-stats-${new Date().toISOString().slice(0, 10)}.md`, 'text/markdown');
+  }, [allQuestions]);
+
+  const handleImportStats = useCallback((text: string): { matched: number; total: number } => {
+    const existing = readJSON<Stats>(STATS_KEY, {});
+    const { stats, matched, total } = importStatsMarkdown(text, allQuestions);
+    const merged = { ...existing, ...stats };
+    localStorage.setItem(STATS_KEY, JSON.stringify(merged));
+    setScreen((s) => ({ ...s }));
     return { matched, total };
   }, [allQuestions]);
 
@@ -279,8 +294,11 @@ export default function App() {
         onDataset={handleDataset}
         onExportNotes={handleExportNotes}
         onImportNotes={handleImportNotes}
+        onExportStats={handleExportStats}
+        onImportStats={handleImportStats}
         defaultConfigs={DEFAULT_CONFIGS}
         isNotesMarkdown={isNotesMarkdown}
+        isStatsMarkdown={isStatsMarkdown}
       />
     );
   }

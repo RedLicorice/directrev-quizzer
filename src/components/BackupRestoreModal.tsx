@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { X, Download, Upload, AlertTriangle, CheckCircle2, FileJson, FileText, Info, RotateCcw, StickyNote } from 'lucide-react';
+import { X, Download, Upload, AlertTriangle, CheckCircle2, FileJson, FileText, Info, RotateCcw, StickyNote, BarChart2 } from 'lucide-react';
 import type { Question, Stats } from '../types';
 import { parseMarkdown } from '../utils/parseMarkdown';
 import { STATS_KEY } from '../App';
@@ -14,13 +14,17 @@ interface Props {
   onResetStats: () => void;
   onExportNotes: () => void;
   onImportNotes: (text: string) => { matched: number; total: number };
+  onExportStats: () => void;
+  onImportStats: (text: string) => { matched: number; total: number };
   isNotesMarkdown: (text: string) => boolean;
+  isStatsMarkdown: (text: string) => boolean;
 }
 
 type ParsedFile =
   | { kind: 'backup'; questions: Question[] | null; notes: Record<string, string> | null; stats: Stats | null; filename: string }
   | { kind: 'questions'; questions: Question[]; filename: string }
   | { kind: 'notes-import'; matched: number; total: number; filename: string }
+  | { kind: 'stats-import'; matched: number; total: number; filename: string }
   | { kind: 'error'; message: string; filename: string };
 
 type ConfirmStage = 'idle' | 'confirming';
@@ -30,16 +34,21 @@ function parseFile(
   filename: string,
   isNotesMarkdownFn: (t: string) => boolean,
   importNotesFn: (t: string) => { matched: number; total: number },
+  isStatsMarkdownFn: (t: string) => boolean,
+  importStatsFn: (t: string) => { matched: number; total: number },
 ): ParsedFile {
   if (filename.toLowerCase().endsWith('.md')) {
-    // Check if it's a notes export first
     if (isNotesMarkdownFn(text)) {
       const result = importNotesFn(text);
       return { kind: 'notes-import', ...result, filename };
     }
+    if (isStatsMarkdownFn(text)) {
+      const result = importStatsFn(text);
+      return { kind: 'stats-import', ...result, filename };
+    }
     const questions = parseMarkdown(text);
     if (questions.length === 0)
-      return { kind: 'error', message: 'No questions found — ensure it is a Ditectrev README.md or a Quizzer notes export', filename };
+      return { kind: 'error', message: 'No questions found — ensure it is a Ditectrev README.md, a Quizzer notes export, or a Quizzer stats export', filename };
     return { kind: 'questions', questions, filename };
   }
   try {
@@ -77,7 +86,7 @@ function countStats(): number {
 
 export default function BackupRestoreModal({
   currentQuestionCount, isImported, onClose, onBackup, onRestoreData,
-  onClearImported, onResetStats, onExportNotes, onImportNotes, isNotesMarkdown,
+  onClearImported, onResetStats, onExportNotes, onImportNotes, onExportStats, onImportStats, isNotesMarkdown, isStatsMarkdown,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [parsed, setParsed] = useState<ParsedFile | null>(null);
@@ -97,7 +106,7 @@ export default function BackupRestoreModal({
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target?.result as string;
-      const result = parseFile(text, file.name, isNotesMarkdown, onImportNotes);
+      const result = parseFile(text, file.name, isNotesMarkdown, onImportNotes, isStatsMarkdown, onImportStats);
       setParsed(result);
       if (result.kind === 'backup') {
         setRestoreQ(result.questions !== null);
@@ -112,7 +121,7 @@ export default function BackupRestoreModal({
     e.target.value = '';
   }
 
-  const availableQ = (): Question[] | null => (!parsed || parsed.kind === 'error' || parsed.kind === 'notes-import') ? null : parsed.questions ?? null;
+  const availableQ = (): Question[] | null => (!parsed || parsed.kind === 'error' || parsed.kind === 'notes-import' || parsed.kind === 'stats-import') ? null : parsed.questions ?? null;
   const availableN = (): Record<string, string> | null => (parsed?.kind === 'backup' ? parsed.notes : null) ?? null;
   const availableS = (): Stats | null => (parsed?.kind === 'backup' ? parsed.stats : null) ?? null;
 
@@ -192,6 +201,16 @@ export default function BackupRestoreModal({
                   <StickyNote className="w-4 h-4" /> Notes .md
                 </button>
               </div>
+
+              <div className="flex items-start justify-between gap-4 p-4 rounded-xl bg-slate-700/30 border border-slate-700/50">
+                <div className="text-sm text-slate-400">
+                  Export answer statistics only as Markdown.
+                  <div className="text-xs text-slate-500 mt-1">{statsCount} stat record{statsCount !== 1 ? 's' : ''} · matched by question hash on import</div>
+                </div>
+                <button onClick={onExportStats} disabled={statsCount === 0} className="btn-secondary flex items-center gap-2 whitespace-nowrap shrink-0 text-sm disabled:opacity-40">
+                  <BarChart2 className="w-4 h-4" /> Stats .md
+                </button>
+              </div>
             </div>
           </section>
 
@@ -266,6 +285,16 @@ export default function BackupRestoreModal({
                       <p className="font-medium">Notes imported</p>
                       <p className="text-xs text-emerald-400/70 mt-0.5">
                         {parsed.matched} of {parsed.total} notes matched to current questions
+                      </p>
+                    </div>
+                  </div>
+                ) : parsed.kind === 'stats-import' ? (
+                  <div className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium">Stats imported</p>
+                      <p className="text-xs text-emerald-400/70 mt-0.5">
+                        {parsed.matched} of {parsed.total} stat records matched to current questions
                       </p>
                     </div>
                   </div>
