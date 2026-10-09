@@ -165,15 +165,15 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
     <div className="min-h-screen flex flex-col relative">
       {/* Top bar */}
       <div className="sticky top-0 z-10 glass border-b border-slate-700/50 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center gap-3">
-          <button onClick={() => setShowExitConfirm(true)} className="btn-ghost p-2"><X className="w-5 h-5" /></button>
+        <div className="max-w-3xl mx-auto flex items-center gap-1.5 sm:gap-3">
+          <button onClick={() => setShowExitConfirm(true)} className="btn-ghost p-1.5 sm:p-2 shrink-0"><X className="w-5 h-5" /></button>
 
-          <div className="flex gap-3 text-sm font-semibold shrink-0">
+          <div className="flex gap-2 sm:gap-3 text-sm font-semibold shrink-0">
             <span className="text-emerald-400">{correct}✓</span>
             <span className="text-rose-400">{wrong}✗</span>
           </div>
 
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
               <div className="h-full bg-amber-500 rounded-full transition-all" style={{ width: `${(revealed.size / questions.length) * 100}%` }} />
             </div>
@@ -181,13 +181,13 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
 
           <span className="text-sm text-slate-400 tabular-nums font-medium shrink-0">{currentIdx + 1}/{questions.length}</span>
 
-          <button onClick={() => setPaused(true)} className="btn-ghost p-2" title="Pause">
+          <button onClick={() => setPaused(true)} className="btn-ghost p-1.5 sm:p-2 shrink-0" title="Pause">
             <Pause className="w-4 h-4" />
           </button>
-          <button onClick={() => setShowSummary(true)} className="btn-ghost p-2" title="Summary">
+          <button onClick={() => setShowSummary(true)} className="btn-ghost p-1.5 sm:p-2 shrink-0" title="Summary">
             <LayoutList className="w-5 h-5" />
           </button>
-          <button onClick={handleExportSession} className="btn-ghost p-2" title="Export session">
+          <button onClick={handleExportSession} className="btn-ghost p-1.5 sm:p-2 shrink-0" title="Export session">
             <Download className="w-4 h-4" />
           </button>
           <button onClick={handleFinish} className="text-xs text-slate-500 hover:text-slate-300 transition-colors shrink-0">
