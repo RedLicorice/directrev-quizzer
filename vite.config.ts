@@ -19,16 +19,6 @@ function signedOutPage(): Plugin {
   };
 }
 
-/** <title> must match the PWA manifest name (index.html itself keeps the Pages default). */
-function htmlTitle(title: string): Plugin {
-  return {
-    name: 'quizzer-html-title',
-    transformIndexHtml(html) {
-      return html.replace(/<title>.*?<\/title>/, `<title>${title}</title>`);
-    },
-  };
-}
-
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   const aws = env.VITE_DEPLOY === 'aws';
@@ -38,12 +28,12 @@ export default defineConfig(({ mode }) => {
     base,
     plugins: [
       react(),
-      ...(aws ? [signedOutPage(), htmlTitle('Quizzer')] : []),
+      ...(aws ? [signedOutPage()] : []),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.svg', 'icon-192.svg', 'icon-512.svg'],
         manifest: {
-          name: aws ? 'Quizzer' : 'AWS Quizzer',
+          name: 'Quizzer',
           short_name: 'Quizzer',
           description: aws ? 'Quizzer: practice tests' : 'AWS Developer Associate (DVA-C02) Practice Tests',
           theme_color: '#0f172a',

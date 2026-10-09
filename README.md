@@ -1,4 +1,4 @@
-# AWS Quizzer
+# Quizzer
 
 A clean, offline-capable **Progressive Web App** for practising the **AWS Certified Developer Associate (DVA-C02)** exam.  
 Bundled with 387 unique questions from the [Ditectrev open-source question bank](https://github.com/Ditectrev/Amazon-Web-Services-AWS-Developer-Associate-DVA-C02-Practice-Tests-Exams-Questions-Answers).
