@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "context": { "eventType": "viewer-request" },
+  "viewer": { "ip": "198.51.100.10" },
+  "request": {
+    "method": "GET",
+    "uri": "/data/aws-dva-c02/questions.json",
+    "querystring": {},
+    "headers": { "accept": { "value": "text/html" }, "sec-fetch-mode": { "value": "navigate" } },
+    "cookies": {}
+  }
+}

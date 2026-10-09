@@ -1,0 +1,69 @@
+#!/usr/bin/env node
+// Minimal fake AWS CLI for the script tests: KVS (with ETag / --if-match) and Cognito
+// admin calls. State in $FAKE_AWS_STATE (JSON), every call appended to $FAKE_AWS_LOG.
+import fs from 'node:fs';
+const argv = process.argv.slice(2);
+const state = JSON.parse(fs.readFileSync(process.env.FAKE_AWS_STATE, 'utf8'));
+fs.appendFileSync(process.env.FAKE_AWS_LOG, JSON.stringify(argv) + '\n');
+const opt = (name) => {
+  const i = argv.indexOf(name);
+  return i === -1 ? undefined : argv[i + 1];
+};
+const save = () => fs.writeFileSync(process.env.FAKE_AWS_STATE, JSON.stringify(state));
+const fail = (msg) => {
+  process.stderr.write(msg + '\n');
+  process.exit(254);
+};
+const [svc, cmd] = argv;
+if (svc === 'cloudfront-keyvaluestore') {
+  if (opt('--kvs-arn') !== state.kvsArn) fail('ResourceNotFoundException: kvs');
+  const bump = () => (state.etag = 'E' + (parseInt(state.etag.slice(1), 10) + 1));
+  const checkEtag = () => {
+    if (opt('--if-match') !== state.etag) fail('ConflictException: etag');
+  };
+  if (cmd === 'describe-key-value-store') {
+    process.stdout.write(opt('--query') === 'ETag' ? state.etag + '\n' : JSON.stringify({ ETag: state.etag }));
+  } else if (cmd === 'get-key') {
+    const k = opt('--key');
+    if (!(k in state.kvs)) fail('ResourceNotFoundException: key');
+    process.stdout.write(opt('--query') === 'Value' ? state.kvs[k] + '\n' : JSON.stringify({ Key: k, Value: state.kvs[k] }));
+  } else if (cmd === 'list-keys') {
+    process.stdout.write(JSON.stringify({ Items: Object.entries(state.kvs).map(([Key, Value]) => ({ Key, Value })) }));
+  } else if (cmd === 'put-key') {
+    checkEtag();
+    state.kvs[opt('--key')] = opt('--value');
+    bump();
+    save();
+    process.stdout.write(JSON.stringify({ ETag: state.etag }));
+  } else if (cmd === 'delete-key') {
+    checkEtag();
+    delete state.kvs[opt('--key')];
+    bump();
+    save();
+  } else fail('unknown kvs command ' + cmd);
+} else if (svc === 'cognito-idp') {
+  if (opt('--user-pool-id') !== state.pool) fail('ResourceNotFoundException: pool');
+  const u = opt('--username');
+  state.users = state.users || {};
+  if (cmd === 'admin-create-user') {
+    if (opt('--message-action') === 'RESEND') {
+      if (!state.users[u]) fail('UserNotFoundException');
+    } else {
+      if (state.users[u]) fail('UsernameExistsException');
+      state.users[u] = { enabled: true, groups: [] };
+    }
+  } else if (cmd === 'admin-add-user-to-group') {
+    state.users[u].groups.push(opt('--group-name'));
+  } else if (cmd === 'admin-remove-user-from-group') {
+    state.users[u].groups = state.users[u].groups.filter((g) => g !== opt('--group-name'));
+  } else if (cmd === 'admin-list-groups-for-user') {
+    process.stdout.write(state.users[u].groups.join('\t') + '\n');
+  } else if (cmd === 'admin-disable-user') {
+    state.users[u].enabled = false;
+  } else if (cmd === 'admin-user-global-sign-out') {
+    state.users[u].signedOut = true;
+  } else if (cmd === 'admin-delete-user') {
+    delete state.users[u];
+  } else fail('unknown cognito command ' + cmd);
+  save();
+} else fail('unknown service ' + svc);

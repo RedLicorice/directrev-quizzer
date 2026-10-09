@@ -1,0 +1,30 @@
+{
+  "name": "quizzer-infra",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Quizzer on AWS: CloudFront Function session-check, auth Lambda, Terraform",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build:edge": "node edge/build-function.mjs",
+    "check:edge": "node edge/build-function.mjs --check",
+    "build:lambda": "node lambda/auth/build.mjs",
+    "build": "npm run build:edge && npm run build:lambda",
+    "typecheck": "tsc -p lambda/auth/tsconfig.json --noEmit",
+    "test": "npm run check:edge && npm run typecheck && vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudfront-keyvaluestore": "3.1148.0",
+    "@aws-sdk/client-ssm": "3.1148.0",
+    "@aws-sdk/signature-v4a": "3.1138.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "8.10.164",
+    "@types/node": "22.20.5",
+    "acorn": "8.19.0",
+    "acorn-walk": "8.3.5",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3"
+  }
+}
