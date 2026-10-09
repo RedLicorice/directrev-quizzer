@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import type { Mode, SessionConfig, SessionResult, SessionRecord, Question, Stats, PracticeSessionDraft } from './types';
+import { useState, useCallback, useEffect } from 'react';
+import type { Mode, SessionConfig, SessionResult, SessionRecord, Question, Stats, PracticeSessionDraft, SourceConfig, DatasetEntry } from './types';
 import { DEFAULT_CONFIGS } from './types';
 import { shuffle } from './utils/shuffle';
 import { weightedSample } from './utils/weightedSample';
@@ -14,6 +14,9 @@ import ResultsScreen from './components/ResultsScreen';
 import SessionHistoryScreen from './components/SessionHistoryScreen';
 import SessionReviewScreen from './components/SessionReviewScreen';
 import DatasetScreen from './components/DatasetScreen';
+import { setActiveDataset, statsKey, notesKey, sessionsKey, practiceDraftKey, BUNDLED_DATASET_KEY } from './utils/storage';
+import { BUNDLED_SOURCE_ID, loadSources, loadActive, saveActive, loadIndex, loadDataset, datasetKey } from './utils/datasets';
+import type { ActiveRef } from './utils/datasets';
 
 type Screen =
   | { name: 'home' }
@@ -24,12 +27,16 @@ type Screen =
   | { name: 'review'; record: SessionRecord }
   | { name: 'dataset' };
 
-const IMPORTED_QUESTIONS_KEY = 'quizzer_imported_questions';
-const NOTES_KEY = 'quizzer_notes';
-export const STATS_KEY = 'quizzer_stats';
-export const SESSIONS_KEY = 'quizzer_sessions';
-export const PRACTICE_DRAFT_KEY = 'quizzer_practice_draft';
 const MAX_SESSIONS = 100;
+const BUNDLED_TITLE = 'AWS Certified Developer Associate (DVA-C02)';
+const IMPORTED_FILE_KEY = 'imported-file';
+const BUNDLED_REF: ActiveRef = { sourceId: BUNDLED_SOURCE_ID, datasetId: BUNDLED_DATASET_KEY };
+
+function initialActive(): ActiveRef {
+  const ref = loadActive() ?? BUNDLED_REF;
+  setActiveDataset(datasetKey(ref.sourceId, ref.datasetId, BUNDLED_DATASET_KEY));
+  return ref;
+}
 
 function downloadBlob(content: string, filename: string, type: string) {
   const blob = new Blob([content], { type });
@@ -64,81 +71,129 @@ async function loadBundled(): Promise<Question[]> {
   } catch { return []; }
 }
 
-function loadFromStorage(): Question[] | null {
-  const parsed = readJSON<Question[]>(IMPORTED_QUESTIONS_KEY, []);
-  return parsed.length > 0 ? parsed : null;
-}
-
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'home' });
-  const [allQuestions, setAllQuestions] = useState<Question[]>(() => loadFromStorage() ?? []);
+  const [allQuestions, setAllQuestions] = useState<Question[]>([]);
   const [loadError, setLoadError] = useState(false);
-  const [isImported, setIsImported] = useState(() => loadFromStorage() !== null);
+  const [isImported, setIsImported] = useState(false); // questions loaded from a file for this session only
+  const [active, setActive] = useState<ActiveRef>(initialActive);
+  const [datasetTitle, setDatasetTitle] = useState(BUNDLED_TITLE);
+  const [datasetLoading, setDatasetLoading] = useState(false);
+  const [datasetError, setDatasetError] = useState<string | null>(null);
 
-  const ensureLoaded = useCallback(async () => {
-    if (allQuestions.length > 0) return allQuestions;
+  const activateBundled = useCallback(async (): Promise<boolean> => {
     const qs = await loadBundled();
-    if (qs.length === 0) setLoadError(true);
+    setActiveDataset(BUNDLED_DATASET_KEY);
+    saveActive(BUNDLED_REF);
+    setActive(BUNDLED_REF);
+    setDatasetTitle(BUNDLED_TITLE);
     setAllQuestions(qs);
-    return qs;
-  }, [allQuestions]);
+    setIsImported(false);
+    setLoadError(qs.length === 0);
+    return qs.length > 0;
+  }, []);
+
+  /** Loads a dataset from the bundled data (src = null) or from a configured source. */
+  const openDataset = useCallback(async (src: SourceConfig | null, entry: DatasetEntry) => {
+    setDatasetLoading(true);
+    setDatasetError(null);
+    try {
+      if (!src) { await activateBundled(); return true; }
+      const qs = await loadDataset(src, entry);
+      const ref: ActiveRef = { sourceId: src.id, datasetId: entry.id };
+      setActiveDataset(datasetKey(ref.sourceId, ref.datasetId, BUNDLED_DATASET_KEY));
+      saveActive(ref);
+      setActive(ref);
+      setDatasetTitle(entry.title);
+      setAllQuestions(qs);
+      setIsImported(false);
+      setLoadError(false);
+      return true;
+    } catch (e) {
+      setDatasetError(`${src?.name ?? 'Dataset'}: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    } finally {
+      setDatasetLoading(false);
+    }
+  }, [activateBundled]);
+
+  /** (Re)loads whatever dataset was last active, falling back to the bundled one. */
+  const restoreActive = useCallback(async () => {
+    const ref = loadActive() ?? BUNDLED_REF;
+    if (ref.sourceId === BUNDLED_SOURCE_ID) { await activateBundled(); return; }
+    const src = loadSources().find((s) => s.id === ref.sourceId);
+    setDatasetLoading(true);
+    try {
+      if (!src) throw new Error('source no longer configured');
+      const entry = (await loadIndex(src)).find((d) => d.id === ref.datasetId);
+      if (!entry) throw new Error(`dataset "${ref.datasetId}" not found in index.json`);
+      setDatasetLoading(false);
+      await openDataset(src, entry);
+    } catch (e) {
+      setDatasetLoading(false);
+      await activateBundled();
+      setDatasetError(`Could not load "${ref.datasetId}" (${e instanceof Error ? e.message : String(e)}). Showing the bundled dataset instead.`);
+    }
+  }, [activateBundled, openDataset]);
+
+  useEffect(() => { void restoreActive(); }, [restoreActive]);
+
+  const ensureLoaded = useCallback(async () => allQuestions, [allQuestions]);
 
   const handleSelectMode = useCallback(
     async (mode: Mode) => { await ensureLoaded(); setScreen({ name: 'config', mode }); },
     [ensureLoaded],
   );
 
-  const handleSetQuestions = useCallback((questions: Question[], persist: boolean) => {
-    if (persist) { localStorage.setItem(IMPORTED_QUESTIONS_KEY, JSON.stringify(questions)); setIsImported(true); }
+  /** Questions loaded from a file are kept in memory only, with their own progress bucket. */
+  const handleSetQuestions = useCallback((questions: Question[]) => {
+    setActiveDataset(IMPORTED_FILE_KEY);
+    setDatasetTitle('Imported file (this session only)');
     setAllQuestions(questions);
+    setIsImported(true);
     setLoadError(false);
   }, []);
 
-  const handleClearImported = useCallback(() => {
-    localStorage.removeItem(IMPORTED_QUESTIONS_KEY);
-    setIsImported(false);
-    setAllQuestions([]);
-    loadBundled().then((qs) => { setAllQuestions(qs); if (qs.length === 0) setLoadError(true); });
-  }, []);
+  const handleClearImported = useCallback(() => { void restoreActive(); }, [restoreActive]);
 
   const handleBackup = useCallback(() => {
     downloadJSON(
       {
-        version: 2,
+        version: 3,
+        dataset: datasetKey(active.sourceId, active.datasetId, BUNDLED_DATASET_KEY),
         exportedAt: new Date().toISOString(),
-        questions: allQuestions,
-        notes: readJSON(NOTES_KEY, {}),
-        stats: readJSON(STATS_KEY, {}),
+        notes: readJSON(notesKey(), {}),
+        stats: readJSON(statsKey(), {}),
       },
       `quizzer-backup-${new Date().toISOString().slice(0, 10)}.json`,
     );
-  }, [allQuestions]);
+  }, [active]);
 
   const handleExportNotes = useCallback(() => {
-    const notes = readJSON<Record<string, string>>(NOTES_KEY, {});
+    const notes = readJSON<Record<string, string>>(notesKey(), {});
     const md = exportNotesMarkdown(allQuestions, notes);
     downloadBlob(md, `quizzer-notes-${new Date().toISOString().slice(0, 10)}.md`, 'text/markdown');
   }, [allQuestions]);
 
   const handleImportNotes = useCallback((text: string): { matched: number; total: number } => {
-    const existing = readJSON<Record<string, string>>(NOTES_KEY, {});
+    const existing = readJSON<Record<string, string>>(notesKey(), {});
     const { notes, matched, total } = importNotesMarkdown(text, allQuestions);
     const merged = { ...existing, ...notes };
-    localStorage.setItem(NOTES_KEY, JSON.stringify(merged));
+    localStorage.setItem(notesKey(), JSON.stringify(merged));
     return { matched, total };
   }, [allQuestions]);
 
   const handleExportStats = useCallback(() => {
-    const stats = readJSON<Stats>(STATS_KEY, {});
+    const stats = readJSON<Stats>(statsKey(), {});
     const md = exportStatsMarkdown(allQuestions, stats);
     downloadBlob(md, `quizzer-stats-${new Date().toISOString().slice(0, 10)}.md`, 'text/markdown');
   }, [allQuestions]);
 
   const handleImportStats = useCallback((text: string): { matched: number; total: number } => {
-    const existing = readJSON<Stats>(STATS_KEY, {});
+    const existing = readJSON<Stats>(statsKey(), {});
     const { stats, matched, total } = importStatsMarkdown(text, allQuestions);
     const merged = { ...existing, ...stats };
-    localStorage.setItem(STATS_KEY, JSON.stringify(merged));
+    localStorage.setItem(statsKey(), JSON.stringify(merged));
     setScreen((s) => ({ ...s }));
     return { matched, total };
   }, [allQuestions]);
@@ -148,35 +203,30 @@ export default function App() {
     notes?: Record<string, string>;
     stats?: Stats;
   }) => {
-    if (data.questions) {
-      localStorage.setItem(IMPORTED_QUESTIONS_KEY, JSON.stringify(data.questions));
-      setIsImported(true);
-      setAllQuestions(data.questions);
-      setLoadError(false);
-    }
-    if (data.notes) localStorage.setItem(NOTES_KEY, JSON.stringify(data.notes));
-    if (data.stats) localStorage.setItem(STATS_KEY, JSON.stringify(data.stats));
-  }, []);
+    if (data.questions) handleSetQuestions(data.questions);
+    if (data.notes) localStorage.setItem(notesKey(), JSON.stringify(data.notes));
+    if (data.stats) localStorage.setItem(statsKey(), JSON.stringify(data.stats));
+  }, [handleSetQuestions]);
 
   const handleResetStats = useCallback(() => {
-    localStorage.removeItem(STATS_KEY);
+    localStorage.removeItem(statsKey());
     setScreen((s) => ({ ...s }));
   }, []);
 
   const handleResetStat = useCallback((qId: number) => {
-    const stats = readJSON<Stats>(STATS_KEY, {});
+    const stats = readJSON<Stats>(statsKey(), {});
     delete stats[String(qId)];
-    localStorage.setItem(STATS_KEY, JSON.stringify(stats));
+    localStorage.setItem(statsKey(), JSON.stringify(stats));
     setScreen((s) => ({ ...s }));
   }, []);
 
   const handleClearHistory = useCallback(() => {
-    localStorage.removeItem(SESSIONS_KEY);
+    localStorage.removeItem(sessionsKey());
   }, []);
 
   const handleStartSession = useCallback(
     (mode: Mode, config: SessionConfig) => {
-      const stats = readJSON<Stats>(STATS_KEY, {});
+      const stats = readJSON<Stats>(statsKey(), {});
 
       // Pre-filter pool for weak mode (practice only)
       let pool = allQuestions;
@@ -213,7 +263,7 @@ export default function App() {
     const questionMap = new Map(allQuestions.map((q) => [q.id, q]));
     const questions = draft.questionIds.map((id) => questionMap.get(id)).filter(Boolean) as Question[];
     if (questions.length === 0) {
-      localStorage.removeItem(PRACTICE_DRAFT_KEY);
+      localStorage.removeItem(practiceDraftKey());
       return;
     }
     setScreen({ name: 'session', mode: 'practice', config: draft.config, questions, draft });
@@ -243,7 +293,7 @@ export default function App() {
 
   const handleSessionEnd = useCallback((result: SessionResult) => {
     // Clear any draft when session finishes
-    if (result.mode === 'practice') localStorage.removeItem(PRACTICE_DRAFT_KEY);
+    if (result.mode === 'practice') localStorage.removeItem(practiceDraftKey());
 
     if (result.mode !== 'flashcard') {
       const correctCount = result.questions.filter((q, i) => isAnswerCorrect(q, result.answers[i] ?? [])).length;
@@ -257,9 +307,9 @@ export default function App() {
         timeElapsed: result.timeElapsed,
         correctCount,
       };
-      const prev = readJSON<SessionRecord[]>(SESSIONS_KEY, []);
+      const prev = readJSON<SessionRecord[]>(sessionsKey(), []);
       const updated = [record, ...prev].slice(0, MAX_SESSIONS);
-      localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated));
+      localStorage.setItem(sessionsKey(), JSON.stringify(updated));
       setScreen({ name: 'results', result });
     } else {
       setScreen({ name: 'home' });
@@ -284,6 +334,11 @@ export default function App() {
         questionCount={allQuestions.length}
         loadError={loadError}
         isImported={isImported}
+        datasetTitle={datasetTitle}
+        active={active}
+        datasetLoading={datasetLoading}
+        datasetError={datasetError}
+        onOpenDataset={openDataset}
         onSelectMode={handleSelectMode}
         onSetQuestions={handleSetQuestions}
         onClearImported={handleClearImported}
@@ -306,7 +361,7 @@ export default function App() {
   if (screen.name === 'history') {
     return (
       <SessionHistoryScreen
-        sessionsKey={SESSIONS_KEY}
+        sessionsKey={sessionsKey()}
         onBack={handleHome}
         onOpen={(record) => setScreen({ name: 'review', record })}
         onClearHistory={handleClearHistory}
@@ -324,7 +379,7 @@ export default function App() {
   }
 
   if (screen.name === 'dataset') {
-    const stats = readJSON<Stats>(STATS_KEY, {});
+    const stats = readJSON<Stats>(statsKey(), {});
     return (
       <DatasetScreen
         questions={allQuestions}
@@ -337,8 +392,8 @@ export default function App() {
   }
 
   if (screen.name === 'config') {
-    const draft = readJSON<PracticeSessionDraft | null>(PRACTICE_DRAFT_KEY, null);
-    const stats = readJSON<Stats>(STATS_KEY, {});
+    const draft = readJSON<PracticeSessionDraft | null>(practiceDraftKey(), null);
+    const stats = readJSON<Stats>(statsKey(), {});
     const seenCount = allQuestions.filter((q) => {
       const s = stats[String(q.id)];
       return s && s.correct + s.wrong > 0;

@@ -3,11 +3,13 @@ import { X, ChevronLeft, ChevronRight, StickyNote, CheckCircle2, XCircle, Chevro
 import type { Question, SessionConfig, SessionResult, Stats, PracticeSessionDraft, PracticeSessionExport } from '../types';
 import { isAnswerCorrect } from '../utils/scoring';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import { STATS_KEY, PRACTICE_DRAFT_KEY } from '../App';
+import { statsKey, notesKey, practiceDraftKey } from '../utils/storage';
 import SummaryModal from './SummaryModal';
 import type { QuestionStatus } from './SummaryModal';
 import ReactMarkdown from 'react-markdown';
 import { QuestionMarkdown, InlineText } from './MarkdownText';
+import DatasetImage from './DatasetImage';
+import ExplanationBlock from './ExplanationBlock';
 
 interface Props {
   questions: Question[];
@@ -29,7 +31,7 @@ function downloadJSON(data: unknown, filename: string) {
 function QuestionImage({ src }: { src: string }) {
   return (
     <div className="mt-4">
-      <img src={src} alt="Question diagram" className="max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />
+      <DatasetImage src={src} alt="Question diagram" className="max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />
     </div>
   );
 }
@@ -42,8 +44,8 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
   const [paused, setPaused] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const [notes, setNotes] = useLocalStorage<Record<string, string>>('quizzer_notes', {});
-  const [stats, setStats] = useLocalStorage<Stats>(STATS_KEY, {});
+  const [notes, setNotes] = useLocalStorage<Record<string, string>>(notesKey(), {});
+  const [stats, setStats] = useLocalStorage<Stats>(statsKey(), {});
   const [startTime] = useState(() => initialDraft?.startTime ?? Date.now());
   const draftIdRef = useRef(initialDraft?.id ?? String(Date.now()));
 
@@ -68,7 +70,7 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
       revealed: Array.from(revealed),
       startTime,
     };
-    localStorage.setItem(PRACTICE_DRAFT_KEY, JSON.stringify(draft));
+    localStorage.setItem(practiceDraftKey(), JSON.stringify(draft));
   }, [answers, revealed, currentIdx, questions, config, startTime]);
 
   const toggleOption = useCallback(
@@ -113,7 +115,7 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
   }
 
   function handleFinish() {
-    localStorage.removeItem(PRACTICE_DRAFT_KEY);
+    localStorage.removeItem(practiceDraftKey());
     onFinish({ mode: 'practice', questions, answers, config, timeElapsed: Math.round((Date.now() - startTime) / 1000) });
   }
 
@@ -246,7 +248,7 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
                   <div className="flex-1 min-w-0">
                     <InlineText text={opt.text} />
                     {opt.image && (
-                      <img src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
+                      <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
                         className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />
                     )}
                   </div>
@@ -254,6 +256,8 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
               </button>
             ))}
           </div>
+
+          {isRevealed && <ExplanationBlock q={q} />}
 
           {/* Notes editor */}
           <div className="card overflow-hidden">

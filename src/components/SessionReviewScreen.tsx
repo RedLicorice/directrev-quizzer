@@ -7,6 +7,9 @@ import { formatSeconds } from '../hooks/useTimer';
 import SummaryModal from './SummaryModal';
 import type { QuestionStatus } from './SummaryModal';
 import ReactMarkdown from 'react-markdown';
+import { notesKey } from '../utils/storage';
+import DatasetImage from './DatasetImage';
+import ExplanationBlock from './ExplanationBlock';
 
 interface Props {
   record: SessionRecord;
@@ -19,7 +22,7 @@ export default function SessionReviewScreen({ record, onBack }: Props) {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [notesOpen, setNotesOpen] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
-  const [notes] = useLocalStorage<Record<string, string>>('quizzer_notes', {});
+  const [notes] = useLocalStorage<Record<string, string>>(notesKey(), {});
 
   const { questions, answers, config, timeElapsed, correctCount, mode, date } = record;
   const q = questions[currentIdx];
@@ -98,6 +101,9 @@ export default function SessionReviewScreen({ record, onBack }: Props) {
               <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">Select {q.selectCount} answers</p>
             )}
             <p className="text-slate-100 text-base sm:text-lg leading-relaxed">{q.text}</p>
+            {q.image && (
+              <DatasetImage src={q.image} alt="Question diagram" className="mt-4 max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />
+            )}
           </div>
 
           <div className="space-y-2.5">
@@ -113,9 +119,15 @@ export default function SessionReviewScreen({ record, onBack }: Props) {
                   {String.fromCharCode(65 + i)}
                 </span>
                 {opt.text}
+                {opt.image && (
+                  <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
+                    className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />
+                )}
               </div>
             ))}
           </div>
+
+          <ExplanationBlock q={q} />
 
           {/* Notes (read-only view) */}
           {noteText && (

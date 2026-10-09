@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { X, Download, Upload, AlertTriangle, CheckCircle2, FileJson, FileText, Info, RotateCcw, StickyNote, BarChart2 } from 'lucide-react';
 import type { Question, Stats } from '../types';
 import { parseMarkdown } from '../utils/parseMarkdown';
-import { STATS_KEY } from '../App';
+import { statsKey, notesKey } from '../utils/storage';
 
 interface Props {
   currentQuestionCount: number;
@@ -75,12 +75,12 @@ function parseFile(
 }
 
 function countNotes(): number {
-  try { return Object.values(JSON.parse(localStorage.getItem('quizzer_notes') ?? '{}')).filter((v) => (v as string).trim()).length; }
+  try { return Object.values(JSON.parse(localStorage.getItem(notesKey()) ?? '{}')).filter((v) => (v as string).trim()).length; }
   catch { return 0; }
 }
 
 function countStats(): number {
-  try { return Object.keys(JSON.parse(localStorage.getItem(STATS_KEY) ?? '{}')).length; }
+  try { return Object.keys(JSON.parse(localStorage.getItem(statsKey()) ?? '{}')).length; }
   catch { return 0; }
 }
 
@@ -178,10 +178,8 @@ export default function BackupRestoreModal({
             <div className="space-y-2.5">
               <div className="flex items-start justify-between gap-4 p-4 rounded-xl bg-slate-700/30 border border-slate-700/50">
                 <div className="text-sm text-slate-400">
-                  Export questions, notes and stats to a single JSON file.
+                  Export notes and stats of the current dataset to a single JSON file.
                   <div className="flex gap-3 mt-1 text-xs text-slate-500">
-                    <span>{currentQuestionCount} questions</span>
-                    <span>·</span>
                     <span>{notes} note{notes !== 1 ? 's' : ''}</span>
                     <span>·</span>
                     <span>{statsCount} stat record{statsCount !== 1 ? 's' : ''}</span>
@@ -222,11 +220,11 @@ export default function BackupRestoreModal({
                 <div className="flex items-center justify-between gap-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
                   <div className="flex items-center gap-2.5 text-sm text-amber-300">
                     <Info className="w-4 h-4 shrink-0" />
-                    Imported questions active ({currentQuestionCount})
+                    File questions active ({currentQuestionCount}) — not saved
                   </div>
                   {!confirmClear ? (
                     <button onClick={() => setConfirmClear(true)} className="text-xs text-rose-400 hover:text-rose-300 transition-colors shrink-0">
-                      Revert to bundled
+                      Back to dataset
                     </button>
                   ) : (
                     <div className="flex items-center gap-2 shrink-0">
@@ -312,7 +310,7 @@ export default function BackupRestoreModal({
 
                     <div className="space-y-2">
                       <CheckboxRow
-                        label="Questions" available={availableQ() !== null}
+                        label="Questions (this session only)" available={availableQ() !== null}
                         detail={availableQ() ? `${availableQ()!.length} questions` : 'not in file'}
                         checked={restoreQ} onToggle={setRestoreQ} />
                       <CheckboxRow

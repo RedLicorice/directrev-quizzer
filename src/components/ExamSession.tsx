@@ -5,6 +5,7 @@ import { useTimer, formatSeconds } from '../hooks/useTimer';
 import SummaryModal from './SummaryModal';
 import type { QuestionStatus } from './SummaryModal';
 import { QuestionMarkdown, InlineText } from './MarkdownText';
+import DatasetImage from './DatasetImage';
 
 interface Props {
   questions: Question[];
@@ -109,7 +110,7 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
             </p>
             {q.image && (
               <div className="mt-4">
-                <img src={q.image} alt="Question diagram" className="max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />
+                <DatasetImage src={q.image} alt="Question diagram" className="max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />
               </div>
             )}
           </div>
@@ -133,7 +134,7 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
                     <div className="flex-1 min-w-0">
                       <InlineText text={opt.text} />
                       {opt.image && (
-                        <img src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
+                        <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
                           className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />
                       )}
                     </div>

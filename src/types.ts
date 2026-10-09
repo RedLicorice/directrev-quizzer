@@ -9,7 +9,37 @@ export interface Question {
   text: string;
   options: Option[];
   selectCount: number;
-  image?: string; // base64 data URL
+  image?: string; // data URL or URL (relative paths are resolved when a dataset is loaded)
+  explanation?: string;      // markdown, maintained in the dataset repo
+  explanationImage?: string; // data URL or URL
+}
+
+// ── Dataset sources ─────────────────────────────────────────────────────────
+
+/** Where datasets are loaded from: a (possibly private) GitHub repo, or any static HTTP location. */
+export interface SourceConfig {
+  id: string;
+  name: string;
+  kind: 'github' | 'url';
+  repo?: string;   // github: "owner/name"
+  ref?: string;    // github: branch, tag or commit (default "main")
+  path?: string;   // github: sub-directory holding index.json ("" = repo root)
+  token?: string;  // github: read-only token for private repos (stored locally)
+  url?: string;    // url: base URL of the folder holding index.json
+}
+
+export interface DatasetEntry {
+  id: string;
+  title: string;
+  file: string;       // path of questions.json relative to index.json
+  questions?: number;
+  images?: number;
+  source?: string;    // free text / URL describing where the questions come from
+}
+
+export interface DatasetIndex {
+  schemaVersion: number;
+  datasets: DatasetEntry[];
 }
 
 export type Mode = 'exam' | 'practice' | 'flashcard';
