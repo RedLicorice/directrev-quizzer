@@ -16,16 +16,31 @@ export interface Question {
 
 // ── Dataset sources ─────────────────────────────────────────────────────────
 
-/** Where datasets are loaded from: a (possibly private) GitHub repo, or any static HTTP location. */
+/**
+ * Where datasets are loaded from: a (possibly private) GitHub repo, any static HTTP location,
+ * or — only in the AWS build — the same-origin `/data/` tree authorised by the session cookie.
+ * `hosted` sources are built in (never stored in localStorage, never removable).
+ */
 export interface SourceConfig {
   id: string;
   name: string;
-  kind: 'github' | 'url';
+  kind: 'github' | 'url' | 'hosted';
   repo?: string;   // github: "owner/name"
   ref?: string;    // github: branch, tag or commit (default "main")
   path?: string;   // github: sub-directory holding index.json ("" = repo root)
   token?: string;  // github: read-only token for private repos (stored locally)
   url?: string;    // url: base URL of the folder holding index.json
+}
+
+/** Signed-in user as returned by `GET /auth/me` (AWS build only). */
+export interface Session {
+  sub: string;
+  email: string;
+  name?: string;
+  ds: string[];           // dataset ids the user may read; ['*'] = all
+  adm: boolean;
+  exp: number;            // session cookie expiry, seconds since epoch
+  allDatasets?: string[]; // only when ds = ['*']: every published dataset id
 }
 
 export interface DatasetEntry {
