@@ -51,6 +51,7 @@ describe('GitHub Pages build (npm run build)', () => {
   it('keeps its base path, manifest and a service worker without the AWS denylist', () => {
     const html = readFileSync(join(PAGES, 'index.html'), 'utf8');
     expect(html).toContain('/directrev-quizzer/assets/');
+    expect(html).toContain('<title>AWS Quizzer</title>');
     const manifest = JSON.parse(readFileSync(join(PAGES, 'manifest.webmanifest'), 'utf8'));
     expect(manifest.name).toBe('AWS Quizzer');
     expect(manifest.start_url).toBe('/directrev-quizzer/');
@@ -81,6 +82,9 @@ describe('AWS build (npm run build -- --mode aws)', () => {
   it('manifest: name Quizzer, start_url and scope "/"', () => {
     const m = JSON.parse(readFileSync(join(AWS, 'manifest.webmanifest'), 'utf8'));
     expect(m).toMatchObject({ name: 'Quizzer', start_url: '/', scope: '/' });
+  });
+  it('<title> matches the manifest name (not the Pages-only "AWS Quizzer")', () => {
+    expect(readFileSync(join(AWS, 'index.html'), 'utf8')).toContain('<title>Quizzer</title>');
   });
   it('contains the auth client and no bundled dataset', () => {
     const code = js(AWS);

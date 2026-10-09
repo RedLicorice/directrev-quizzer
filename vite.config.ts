@@ -19,6 +19,16 @@ function signedOutPage(): Plugin {
   };
 }
 
+/** <title> must match the PWA manifest name (index.html itself keeps the Pages default). */
+function htmlTitle(title: string): Plugin {
+  return {
+    name: 'quizzer-html-title',
+    transformIndexHtml(html) {
+      return html.replace(/<title>.*?<\/title>/, `<title>${title}</title>`);
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   const aws = env.VITE_DEPLOY === 'aws';
@@ -28,7 +38,7 @@ export default defineConfig(({ mode }) => {
     base,
     plugins: [
       react(),
-      ...(aws ? [signedOutPage()] : []),
+      ...(aws ? [signedOutPage(), htmlTitle('Quizzer')] : []),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.svg', 'icon-192.svg', 'icon-512.svg'],
