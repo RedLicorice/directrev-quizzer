@@ -4,6 +4,7 @@ import type { Mode, SessionConfig, Question, SourceConfig, DatasetEntry } from '
 import BackupRestoreModal from './BackupRestoreModal';
 import DatasetPickerModal from './DatasetPickerModal';
 import { BUNDLED_DATASET_KEY } from '../utils/storage';
+import UserChip from '../aws/auth/UserChip';
 
 interface Props {
   questionCount: number;
@@ -87,6 +88,7 @@ export default function HomeScreen({
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-8 animate-fade-in">
+      {import.meta.env.VITE_DEPLOY === 'aws' && <UserChip />}
       {/* Header */}
       <div className="text-center mb-10">
         <div className="inline-flex items-center gap-3 mb-4">

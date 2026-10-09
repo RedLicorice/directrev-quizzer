@@ -14,6 +14,23 @@ const LEGACY: Record<string, string> = {
 
 let active = BUNDLED_DATASET_KEY;
 
+// ── per-user scope (AWS build only) ────────────────────────────────────────
+// In the hosted build several colleagues may share one browser profile, so every
+// progress key carries the signed-in user's `sub`. The Pages build never sets a user
+// and its keys are unchanged.
+
+let storageUser: string | null = null;
+
+/** Called by the AuthGate once `/auth/me` has answered (AWS build only). */
+export function setStorageUser(sub: string | null) { storageUser = sub; }
+export function getStorageUser() { return storageUser; }
+
+/** `u:<sub>:<key>` in the AWS build, `key` unchanged in the Pages build. */
+export function userScoped(key: string): string {
+  if (import.meta.env.VITE_DEPLOY === 'aws') return `u:${storageUser ?? '?'}:${key}`;
+  return key;
+}
+
 function scoped(base: string) { return `${base}:${active}`; }
 
 function migrateLegacy() {

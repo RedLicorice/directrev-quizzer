@@ -14,8 +14,8 @@ import ResultsScreen from './components/ResultsScreen';
 import SessionHistoryScreen from './components/SessionHistoryScreen';
 import SessionReviewScreen from './components/SessionReviewScreen';
 import DatasetScreen from './components/DatasetScreen';
-import { setActiveDataset, statsKey, notesKey, sessionsKey, practiceDraftKey, BUNDLED_DATASET_KEY } from './utils/storage';
-import { BUNDLED_SOURCE_ID, loadSources, loadActive, saveActive, loadIndex, loadDataset, datasetKey } from './utils/datasets';
+import { setActiveDataset, statsKey, notesKey, sessionsKey, practiceDraftKey, userScoped, BUNDLED_DATASET_KEY } from './utils/storage';
+import { BUNDLED_SOURCE_ID, HOSTED_SOURCE_ID, hostedSource, loadSources, loadActive, saveActive, loadIndex, loadDataset, datasetKey } from './utils/datasets';
 import type { ActiveRef } from './utils/datasets';
 
 type Screen =
@@ -32,8 +32,15 @@ const BUNDLED_TITLE = 'AWS Certified Developer Associate (DVA-C02)';
 const IMPORTED_FILE_KEY = 'imported-file';
 const BUNDLED_REF: ActiveRef = { sourceId: BUNDLED_SOURCE_ID, datasetId: BUNDLED_DATASET_KEY };
 
+/** AWS build: no bundled dataset; the first dataset of the hosted source is the default. */
+const NO_DATASET_REF: ActiveRef = { sourceId: HOSTED_SOURCE_ID, datasetId: '' };
+
+function defaultRef(): ActiveRef {
+  return import.meta.env.VITE_DEPLOY === 'aws' ? NO_DATASET_REF : BUNDLED_REF;
+}
+
 function initialActive(): ActiveRef {
-  const ref = loadActive() ?? BUNDLED_REF;
+  const ref = loadActive() ?? defaultRef();
   setActiveDataset(datasetKey(ref.sourceId, ref.datasetId, BUNDLED_DATASET_KEY));
   return ref;
 }
@@ -63,6 +70,9 @@ function readJSON<T>(key: string, fallback: T): T {
 
 let bundledCache: Question[] | null = null;
 async function loadBundled(): Promise<Question[]> {
+  // The AWS build hides the bundled dataset (same id as the hosted aws-dva-c02, separate
+  // progress would be confusing) and does not even ship it: the chunk is tree-shaken away.
+  if (import.meta.env.VITE_DEPLOY === 'aws') return [];
   if (bundledCache) return bundledCache;
   try {
     const mod = await import('./data/questions.json');
@@ -77,7 +87,7 @@ export default function App() {
   const [loadError, setLoadError] = useState(false);
   const [isImported, setIsImported] = useState(false); // questions loaded from a file for this session only
   const [active, setActive] = useState<ActiveRef>(initialActive);
-  const [datasetTitle, setDatasetTitle] = useState(BUNDLED_TITLE);
+  const [datasetTitle, setDatasetTitle] = useState(import.meta.env.VITE_DEPLOY === 'aws' ? 'Quizzer' : BUNDLED_TITLE);
   const [datasetLoading, setDatasetLoading] = useState(false);
   const [datasetError, setDatasetError] = useState<string | null>(null);
 
@@ -117,8 +127,33 @@ export default function App() {
     }
   }, [activateBundled]);
 
+  /** AWS build: open the remembered hosted dataset, else the first one the session allows. */
+  const restoreHosted = useCallback(async () => {
+    if (import.meta.env.VITE_DEPLOY !== 'aws') return;
+    const ref = loadActive();
+    setDatasetLoading(true);
+    let entries: DatasetEntry[] = [];
+    try {
+      const src = ref && ref.sourceId !== HOSTED_SOURCE_ID ? loadSources().find((s) => s.id === ref.sourceId) : undefined;
+      if (src) {
+        const entry = (await loadIndex(src)).find((d) => d.id === ref!.datasetId);
+        if (entry) { setDatasetLoading(false); await openDataset(src, entry); return; }
+      }
+      entries = await loadIndex(hostedSource());
+    } catch (e) {
+      setDatasetError(e instanceof Error ? e.message : String(e));
+    }
+    setDatasetLoading(false);
+    const entry = entries.find((d) => ref?.sourceId === HOSTED_SOURCE_ID && d.id === ref.datasetId) ?? entries[0];
+    if (entry) { await openDataset(hostedSource(), entry); return; }
+    setAllQuestions([]);
+    setDatasetTitle('Nessun dataset disponibile');
+    setLoadError(false);
+  }, [openDataset]);
+
   /** (Re)loads whatever dataset was last active, falling back to the bundled one. */
   const restoreActive = useCallback(async () => {
+    if (import.meta.env.VITE_DEPLOY === 'aws') { await restoreHosted(); return; }
     const ref = loadActive() ?? BUNDLED_REF;
     if (ref.sourceId === BUNDLED_SOURCE_ID) { await activateBundled(); return; }
     const src = loadSources().find((s) => s.id === ref.sourceId);
@@ -134,7 +169,7 @@ export default function App() {
       await activateBundled();
       setDatasetError(`Could not load "${ref.datasetId}" (${e instanceof Error ? e.message : String(e)}). Showing the bundled dataset instead.`);
     }
-  }, [activateBundled, openDataset]);
+  }, [activateBundled, openDataset, restoreHosted]);
 
   useEffect(() => { void restoreActive(); }, [restoreActive]);
 
@@ -147,7 +182,7 @@ export default function App() {
 
   /** Questions loaded from a file are kept in memory only, with their own progress bucket. */
   const handleSetQuestions = useCallback((questions: Question[]) => {
-    setActiveDataset(IMPORTED_FILE_KEY);
+    setActiveDataset(userScoped(IMPORTED_FILE_KEY));
     setDatasetTitle('Imported file (this session only)');
     setAllQuestions(questions);
     setIsImported(true);

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { X, Database, Plus, Trash2, RefreshCw, AlertTriangle, CheckCircle2, Lock, Globe } from 'lucide-react';
+import { X, Database, Plus, Trash2, RefreshCw, AlertTriangle, CheckCircle2, Lock, Globe, Cloud, ChevronRight } from 'lucide-react';
 import type { DatasetEntry, SourceConfig } from '../types';
-import { BUNDLED_SOURCE_ID, loadIndex, loadSources, saveSources, newSourceId } from '../utils/datasets';
+import { BUNDLED_SOURCE_ID, HOSTED_SOURCE_ID, hostedSource, loadHostedIndex, loadIndex, loadSources, saveSources, newSourceId } from '../utils/datasets';
+import type { HostedListing } from '../utils/datasets';
 
 export interface BundledInfo { id: string; title: string; questions: number }
 
@@ -23,6 +24,14 @@ export default function DatasetPickerModal({ bundled, active, loading, error, on
   const [indexes, setIndexes] = useState<Record<string, IndexState>>({});
   const [form, setForm] = useState(EMPTY);
   const [adding, setAdding] = useState(false);
+  const [hosted, setHosted] = useState<HostedListing[] | null>(null);
+
+  function refreshHosted() {
+    setHosted(null);
+    loadHostedIndex().then(setHosted, (e) => setHosted([{ id: '', error: e instanceof Error ? e.message : String(e) }]));
+  }
+
+  useEffect(() => { if (import.meta.env.VITE_DEPLOY === 'aws') refreshHosted(); }, []);
 
   function refresh(src: SourceConfig) {
     setIndexes((m) => ({ ...m, [src.id]: { status: 'loading' } }));
@@ -53,26 +62,8 @@ export default function DatasetPickerModal({ bundled, active, loading, error, on
   const isActive = (sourceId: string, datasetId: string) => active.sourceId === sourceId && active.datasetId === datasetId;
   const input = 'w-full bg-slate-900/60 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500/60';
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="card w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 animate-slide-up">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2"><Database className="w-5 h-5 text-amber-400" /> Datasets</h2>
-          <button onClick={onClose} className="btn-ghost p-1" aria-label="Close"><X className="w-4 h-4" /></button>
-        </div>
-
-        {error && (
-          <div className="mb-4 flex items-start gap-2 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> <span className="break-words">{error}</span>
-          </div>
-        )}
-
-        <section className="mb-5">
-          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Built in</h3>
-          <DatasetRow title={bundled.title} meta={`${bundled.questions} questions · works offline`} active={isActive(BUNDLED_SOURCE_ID, bundled.id)} disabled={loading}
-            onClick={() => onSelect(null, { id: bundled.id, title: bundled.title, file: '' })} />
-        </section>
-
+  function renderCustom() {
+    return (<>
         {sources.map((src) => {
           const st = indexes[src.id];
           return (
@@ -131,6 +122,63 @@ export default function DatasetPickerModal({ bundled, active, loading, error, on
             <Plus className="w-4 h-4" /> Add a source
           </button>
         )}
+    </>);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="card w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 animate-slide-up">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold flex items-center gap-2"><Database className="w-5 h-5 text-amber-400" /> Datasets</h2>
+          <button onClick={onClose} className="btn-ghost p-1" aria-label="Close"><X className="w-4 h-4" /></button>
+        </div>
+
+        {error && (
+          <div className="mb-4 flex items-start gap-2 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> <span className="break-words">{error}</span>
+          </div>
+        )}
+
+        {import.meta.env.VITE_DEPLOY !== 'aws' && (<section className="mb-5">
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Built in</h3>
+          <DatasetRow title={bundled.title} meta={`${bundled.questions} questions · works offline`} active={isActive(BUNDLED_SOURCE_ID, bundled.id)} disabled={loading}
+            onClick={() => onSelect(null, { id: bundled.id, title: bundled.title, file: '' })} />
+        </section>)}
+
+        {import.meta.env.VITE_DEPLOY === 'aws' && (
+          <section className="mb-5" data-testid="hosted-datasets">
+            <div className="flex items-center gap-2 mb-2">
+              <Cloud className="w-3.5 h-3.5 text-amber-400" />
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Dataset disponibili</h3>
+              <div className="flex-1" />
+              <button onClick={refreshHosted} className="btn-ghost p-1" title="Ricarica"><RefreshCw className="w-3.5 h-3.5" /></button>
+            </div>
+            {!hosted && <p className="text-sm text-slate-500">Caricamento…</p>}
+            {hosted && hosted.length === 0 && <p className="text-sm text-slate-500">Nessun dataset abilitato per il tuo account.</p>}
+            {hosted && hosted.length > 0 && (
+              <div className="space-y-2">{hosted.map((h) => h.entry ? (
+                <DatasetRow key={h.id} title={h.entry.title}
+                  meta={[h.entry.questions != null && `${h.entry.questions} domande`, h.entry.images != null && `${h.entry.images} immagini`].filter(Boolean).join(' · ')}
+                  active={isActive(HOSTED_SOURCE_ID, h.id)} disabled={loading} onClick={() => onSelect(hostedSource(), h.entry!)} />
+              ) : (
+                <p key={h.id} className="text-sm text-rose-400 break-words">{h.id && <span className="font-mono">{h.id}: </span>}{h.error}</p>
+              ))}</div>
+            )}
+          </section>
+        )}
+
+        {import.meta.env.VITE_DEPLOY === 'aws' ? (
+          <details className="group border-t border-slate-700/50 pt-4" open={sources.some((x) => x.id === active.sourceId) || undefined}>
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 mb-3">
+              <ChevronRight className="w-4 h-4 transition-transform group-open:rotate-90" /> Avanzate: sorgenti GitHub / URL
+            </summary>
+            <div className="mb-4 flex items-start gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>Le sorgenti e gli eventuali token GitHub vengono salvati in chiaro nel localStorage di questo browser (separati per utente, ma leggibili da chiunque usi questo profilo del browser). Non inserire token su PC condivisi.</span>
+            </div>
+            {renderCustom()}
+          </details>
+        ) : renderCustom()}
       </div>
     </div>
   );

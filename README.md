@@ -36,7 +36,7 @@ Bundled with 387 unique questions from the [Ditectrev open-source question bank]
 
 ### Prerequisites
 
-- Node.js ≥ 18
+- Node.js ≥ 20 (≥ 18 is enough for the Pages build alone)
 - npm ≥ 9
 
 ### Install and run locally
@@ -207,6 +207,69 @@ Only progress and settings are stored in the browser (`localStorage`). `<dataset
 | `quizzer_active_dataset` | last opened dataset |
 
 Progress saved by earlier versions (unscoped `quizzer_*` keys) is migrated to the bundled dataset automatically.
+
+In the AWS build (below) every key is per user: `<dataset>` becomes `u:<sub>:hosted:<dataset-id>` (or
+`u:<sub>:<source-id>:<dataset-id>`), and `quizzer_sources` / `quizzer_active_dataset` become `…:u:<sub>`, so colleagues
+sharing a browser never see each other's stats, notes or tokens in the app. The legacy migration is not applied there.
+
+---
+
+## Hosting on AWS (colleagues build)
+
+One codebase, two builds:
+
+| | `npm run build` (GitHub Pages) | `npm run build -- --mode aws` (or `npm run build:aws`) |
+|---|---|---|
+| Flag | `VITE_DEPLOY=pages` (`.env`) | `VITE_DEPLOY=aws` (`.env.aws`) |
+| Base path | `VITE_BASE_PATH` (set by the Pages workflow) | `/` |
+| Backend | none | CloudFront + Lambda `auth` (Cognito) + S3, see `infra/` on branch `feat/aws-infra` |
+| Datasets | bundled DVA-C02 + GitHub / Static URL sources | built-in **hosted** source (same origin, `/data/<id>/`), GitHub / URL sources under *Avanzate*; the bundled dataset is not shipped |
+| Progress keys | unchanged | per user (`u:<sub>:…`) |
+| Auth code | tree-shaken away (checked by `tests/builds.test.ts`) | `src/aws/` (`AuthGate`, session client, user chip + *Esci*) |
+
+How the hosted build works:
+
+- At start `AuthGate` calls `GET /auth/me` (cookie `__Host-qz_session`, HttpOnly JWT). No session → one
+  `POST /auth/refresh` → otherwise `location.assign('/auth/login?return=<path>')` (Cognito managed login, invite-only).
+  Without network the app shell still opens from the service worker and shows an offline banner.
+- The hosted source lists the dataset ids the session allows (`ds`, or `allDatasets` when `ds = ["*"]`) and loads
+  `/data/<id>/index.json`, then the entry's `questions.json` (relative to that index). Each dataset repo publishes
+  `data/<id>/{index.json,questions.json,images/}`; there is no shared index. Images are plain `<img>` URLs, the cookie
+  authenticates them. 401 → one refresh + retry → login; 403 → "dataset non abilitato".
+- The session is refreshed 5 minutes before it expires and when the tab becomes visible. *Esci* clears runtime caches,
+  `sessionStorage` and in-memory images, then goes to `/auth/logout`.
+- The service worker never answers `/auth/*`, `/data/*`, `/api/*` with the cached `index.html` and never caches them
+  (`navigateFallbackDenylist` + `NetworkOnly`).
+- Fonts are self-hosted (`@fontsource/inter`, `@fontsource/jetbrains-mono`): no external host, CSP-ready.
+- Limits of a shared PC: progress is separated per user *in the app*, but `localStorage` itself is readable by anyone
+  using the same browser profile, and GitHub tokens of *Avanzate* sources are stored there in clear.
+
+The backend (Terraform, CloudFront Function, Lambda `auth`) lives in `infra/` on branch `feat/aws-infra`; its
+authoritative contract is `infra/CONTRACT.md`, mirrored for the app in [`server/mock/CONTRACT.md`](server/mock/CONTRACT.md).
+
+### Local mock of the backend
+
+`server/mock/server.mjs` (Node ≥ 20, no dependencies) implements the same contract: it serves `dist/`, serves a
+datasets folder under `/data/<id>/`, applies the edge authorization and fakes the `/auth/*` endpoints with a login form
+where you pick the email and the groups (`ds-<id>`, `ds-all`, `admin`).
+
+```bash
+npm run build -- --mode aws
+# <datasets> holds one folder per dataset: <datasets>/aws-dva-c02/, <datasets>/mule-mcd-01/ (e.g. clones of the
+# quizzer-dataset-* repos). It is read in place and never copied into this repo.
+node server/mock/server.mjs --dist dist --data <datasets> --port 4200 --secret dev
+# open http://localhost:4200  (localhost, not 127.0.0.1: __Host-/__Secure- cookies need a secure context,
+# and browsers only treat plain-http localhost as one)
+```
+
+### Tests
+
+```bash
+npm test     # vitest: URL building, 401/403 mapping, per-user keys, session client, edge vectors, mock gateway,
+             # and both builds (Pages invariants, service-worker denylist)
+node e2e/aws-mock.e2e.mjs --data <datasets> --pw <path>/node_modules/playwright-core [--chromium <chrome>] [--out <dir>]
+             # end-to-end in Chromium against the mock (Playwright is not a dependency of this repo)
+```
 
 ---
 
