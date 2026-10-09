@@ -24,7 +24,7 @@ function RateBar({ rate }: { rate: number | null }) {
   const color = rate >= 0.7 ? 'bg-emerald-500' : rate >= 0.4 ? 'bg-amber-500' : 'bg-rose-500';
   return (
     <div className="flex items-center gap-2">
-      <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+      <div className="w-10 sm:w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
       <span className={`text-xs tabular-nums font-medium ${rate >= 0.7 ? 'text-emerald-400' : rate >= 0.4 ? 'text-amber-400' : 'text-rose-400'}`}>
@@ -107,12 +107,12 @@ export default function DatasetScreen({ questions, stats, onBack, onResetStat, o
         <div className="max-w-4xl mx-auto flex items-center gap-3">
           <button onClick={onBack} className="btn-ghost p-2"><ArrowLeft className="w-5 h-5" /></button>
           <h1 className="text-base font-semibold">Dataset</h1>
-          <span className="text-slate-500 text-sm">· {questions.length} questions</span>
+          <span className="text-slate-500 text-sm truncate min-w-0">· {questions.length} questions</span>
           <div className="flex-1" />
           {totalAttempted > 0 && (
             <button
               onClick={() => setConfirmReset('all')}
-              className="flex items-center gap-1.5 text-xs text-rose-400 hover:text-rose-300 transition-colors"
+              className="flex items-center gap-1.5 text-xs text-rose-400 hover:text-rose-300 transition-colors shrink-0"
             >
               <RotateCcw className="w-3 h-3" /> Reset all stats
             </button>
@@ -158,11 +158,11 @@ export default function DatasetScreen({ questions, stats, onBack, onResetStat, o
           {/* Table */}
           <div className="card overflow-hidden">
             {/* Column headers */}
-            <div className="grid grid-cols-[3rem_1fr_5rem_5rem_6rem_2.5rem] gap-2 px-4 py-2.5 border-b border-slate-700/50 items-center">
+            <div className="grid grid-cols-[2rem_minmax(0,1fr)_5.5rem_1.5rem] sm:grid-cols-[3rem_minmax(0,1fr)_5rem_5rem_6rem_2.5rem] gap-2 px-4 py-2.5 border-b border-slate-700/50 items-center">
               <SortBtn k="id" label="#" />
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Question</span>
-              <SortBtn k="attempts" label="Tries" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">✓/✗</span>
+              <span className="hidden sm:block"><SortBtn k="attempts" label="Tries" /></span>
+              <span className="hidden sm:block text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">✓/✗</span>
               <SortBtn k="rate" label="Rate" />
               <span />
             </div>
@@ -176,11 +176,11 @@ export default function DatasetScreen({ questions, stats, onBack, onResetStat, o
                   const rate = getRate(stat);
                   const attempts = (stat?.correct ?? 0) + (stat?.wrong ?? 0);
                   return (
-                    <div key={q.id} className="grid grid-cols-[3rem_1fr_5rem_5rem_6rem_2.5rem] gap-2 px-4 py-3 items-center hover:bg-slate-800/30 transition-colors">
+                    <div key={q.id} className="grid grid-cols-[2rem_minmax(0,1fr)_5.5rem_1.5rem] sm:grid-cols-[3rem_minmax(0,1fr)_5rem_5rem_6rem_2.5rem] gap-2 px-4 py-3 items-center hover:bg-slate-800/30 transition-colors">
                       <span className="text-xs text-slate-500 tabular-nums font-medium">{q.id}</span>
                       <p className="text-sm text-slate-300 leading-snug line-clamp-2 min-w-0">{q.text}</p>
-                      <span className="text-xs text-slate-400 tabular-nums text-center">{attempts || '–'}</span>
-                      <span className="text-xs tabular-nums text-right">
+                      <span className="hidden sm:block text-xs text-slate-400 tabular-nums text-center">{attempts || '–'}</span>
+                      <span className="hidden sm:block text-xs tabular-nums text-right">
                         {stat ? (
                           <span className="flex items-center justify-end gap-1">
                             <span className="text-emerald-400">{stat.correct}</span>
@@ -218,7 +218,7 @@ export default function DatasetScreen({ questions, stats, onBack, onResetStat, o
           )}
 
           {/* Legend */}
-          <div className="flex items-center gap-4 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
             <span className="flex items-center gap-1"><TrendingUp className="w-3 h-3 text-emerald-400" /> Strong ≥70%</span>
             <span className="flex items-center gap-1"><Minus className="w-3 h-3 text-amber-400" /> Mixed 40–70%</span>
             <span className="flex items-center gap-1"><TrendingDown className="w-3 h-3 text-rose-400" /> Weak &lt;40%</span>

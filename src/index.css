@@ -58,6 +58,54 @@
   }
 }
 
+/* Markdown blocks (explanations, notes). The `prose` classes have no typography plugin
+   behind them, so give rendered markdown just enough structure and keep it inside its card. */
+.prose {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.prose > * + * {
+  margin-top: 0.6em;
+}
+.prose ul {
+  list-style: disc;
+  padding-left: 1.25em;
+}
+.prose ol {
+  list-style: decimal;
+  padding-left: 1.25em;
+}
+.prose a {
+  @apply text-blue-400 underline;
+}
+.prose strong {
+  @apply font-semibold text-slate-200;
+}
+.prose blockquote {
+  @apply border-l-2 border-slate-600 pl-3;
+}
+.prose code {
+  @apply bg-slate-700/70 px-1 rounded text-[0.88em] font-mono text-amber-300;
+}
+.prose pre {
+  @apply bg-slate-900/60 border border-slate-700/50 rounded-lg px-3 py-2 overflow-x-auto text-[0.88em] leading-relaxed;
+  overflow-wrap: normal;
+  max-width: 100%;
+}
+.prose pre code {
+  @apply bg-transparent p-0 text-slate-200;
+  font-size: inherit;
+}
+.prose img {
+  max-width: 100%;
+  height: auto;
+}
+.prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 /* Flashcard 3D flip */
 .flip-scene {
   perspective: 1200px;

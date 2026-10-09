@@ -79,8 +79,8 @@ export default function DatasetPickerModal({ bundled, active, loading, error, on
             <section key={src.id} className="mb-5">
               <div className="flex items-center gap-2 mb-2">
                 {src.token ? <Lock className="w-3.5 h-3.5 text-amber-400" /> : <Globe className="w-3.5 h-3.5 text-slate-500" />}
-                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">{src.name}</h3>
-                <span className="text-xs text-slate-600 truncate">{src.kind === 'github' ? `${src.repo}@${src.ref}` : src.url}</span>
+                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate min-w-0">{src.name}</h3>
+                <span className="text-xs text-slate-600 truncate min-w-0 shrink-[3]">{src.kind === 'github' ? `${src.repo}@${src.ref}` : src.url}</span>
                 <div className="flex-1" />
                 <button onClick={() => refresh(src)} className="btn-ghost p-1" title="Reload index"><RefreshCw className="w-3.5 h-3.5" /></button>
                 <button onClick={() => removeSource(src.id)} className="btn-ghost p-1 text-rose-400" title="Remove source"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -141,8 +141,8 @@ function DatasetRow({ title, meta, active, disabled, onClick }: { title: string;
     <button onClick={onClick} disabled={disabled}
       className={`w-full text-left px-4 py-3 rounded-xl border transition-colors disabled:opacity-50 ${active ? 'border-amber-500/60 bg-amber-500/10' : 'border-slate-700 hover:border-slate-500'}`}>
       <div className="flex items-center gap-2">
-        <span className="flex-1 text-sm font-medium text-slate-200">{title}</span>
-        {active && <CheckCircle2 className="w-4 h-4 text-amber-400" />}
+        <span className="flex-1 min-w-0 text-sm font-medium text-slate-200 break-words">{title}</span>
+        {active && <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />}
       </div>
       {meta && <div className="text-xs text-slate-500 mt-0.5">{meta}</div>}
     </button>
