@@ -136,10 +136,11 @@ body>`; for the empty body that is `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b
 |---|---|---|---|
 | `GET /auth/login?return=<path>` | `return` optional | **302** to `https://<cognito-domain>/oauth2/authorize?response_type=code&client_id=..&redirect_uri=https://<app-host>/auth/callback&scope=openid+email+profile&state=..&code_challenge=..&code_challenge_method=S256`; sets `__Secure-qz_pkce` | invalid `return` is replaced by `/` (never an error) |
 | `GET /auth/callback?code&state` | PKCE cookie | **302** to `https://<app-host><return>`; sets `__Host-qz_session` + `__Secure-qz_refresh`; clears PKCE | **400** HTML (missing/expired PKCE cookie, state mismatch, `error=` from Cognito, failed code exchange); **403** HTML "Accesso non abilitato" when the user has no `ds-*`/`ds-all`/`admin` group (refresh token revoked, no session cookie) |
-| `POST /auth/refresh` | refresh cookie, empty body | **200** body = `/auth/me` body; new `__Host-qz_session` | **401** `{"error":"no_refresh"}` (no cookie); **401** `{"error":"refresh_failed"}` + both cookies cleared (revoked/expired token, disabled/deleted user); **403** `{"error":"not_enabled"}` + cookies cleared (groups removed); **403** `{"error":"bad_origin"}` (`Origin`/`Sec-Fetch-Site` not same-origin); **405** for GET |
+| `POST /auth/refresh` | refresh cookie, empty body | **200** body = `/auth/me` body; new `__Host-qz_session` | **401** `{"error":"no_refresh"}` (no cookie); **401** `{"error":"refresh_failed"}` + both cookies cleared (revoked/expired token, disabled/deleted user); **403** `{"error":"not_enabled"}` + cookies cleared (groups removed); **403** `{"error":"bad_origin"}` (`Origin`/`Sec-Fetch-Site` not same-origin); **503** `{"error":"upstream"}` (Cognito 5xx/unreachable: cookies are kept, retry later); **405** for GET |
 | `GET /auth/me` | session cookie | **200** `{"sub","email","name"?,"ds","adm","exp","allDatasets"?}` | **401** `{"error":"unauthenticated"}` |
 | `GET` or `POST /auth/logout` | cookies | revokes the refresh token at Cognito (best effort), clears session + refresh + PKCE cookies, **302** to `https://<cognito-domain>/logout?client_id=..&logout_uri=https://<app-host>/signed-out.html` | never fails |
 | anything else under `/auth/` | | | **404** `{"error":"not_found"}` |
+| any route, unexpected failure (SSM/KVS unreachable, malformed ID token) | | | **500** `{"error":"internal"}` |
 
 - `allDatasets` is present only when `ds = ["*"]`; it is the sorted list of dataset ids from the runtime config
   (SSM parameter, `datasets`).
