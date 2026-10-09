@@ -6,11 +6,11 @@ terraform {
   # Step 1: local state (this block commented out). Step 2: after the first apply,
   # uncomment, fill backend.hcl and run `terraform init -migrate-state -backend-config=backend.hcl`.
   # See infra/README.md, "Bootstrap".
-  # backend "s3" {
-  #   key          = "bootstrap/terraform.tfstate"
-  #   use_lockfile = true
-  #   encrypt      = true
-  # }
+  backend "s3" {
+    key          = "bootstrap/terraform.tfstate"
+    use_lockfile = true
+    encrypt      = true
+  }
 }
 
 provider "aws" {
