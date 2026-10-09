@@ -114,7 +114,7 @@ export default function SessionHistoryScreen({ sessionsKey, onBack, onOpen, onCl
                           <span className={`text-sm font-semibold ${meta.color}`}>{meta.label}</span>
                           <ScoreBadge correct={r.correctCount} total={r.questions.length} passing={r.config.passingScore} />
                         </div>
-                        <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500">
+                        <div className="flex flex-wrap items-center gap-x-3 mt-0.5 text-xs text-slate-500">
                           <span>{formatDate(r.date)}</span>
                           <span>·</span>
                           <span>{formatSeconds(r.timeElapsed)}</span>

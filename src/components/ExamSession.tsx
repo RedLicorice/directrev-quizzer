@@ -4,7 +4,7 @@ import type { Question, SessionConfig, SessionResult } from '../types';
 import { useTimer, formatSeconds } from '../hooks/useTimer';
 import SummaryModal from './SummaryModal';
 import type { QuestionStatus } from './SummaryModal';
-import { QuestionMarkdown, InlineText } from './MarkdownText';
+import { QuestionMarkdown, OptionText } from './MarkdownText';
 import DatasetImage from './DatasetImage';
 
 interface Props {
@@ -68,13 +68,13 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
     <div className="min-h-screen flex flex-col">
       {/* Top bar */}
       <div className="sticky top-0 z-10 glass border-b border-slate-700/50 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center gap-3">
-          <button onClick={() => setShowExitConfirm(true)} className="btn-ghost p-2"><X className="w-5 h-5" /></button>
+        <div className="max-w-3xl mx-auto flex items-center gap-2 sm:gap-3">
+          <button onClick={() => setShowExitConfirm(true)} className="btn-ghost p-2 shrink-0"><X className="w-5 h-5" /></button>
 
-          <div className="flex-1">
-            <div className="flex justify-between text-xs text-slate-500 mb-1">
-              <span>{answered} answered</span>
-              <span>{unanswered} remaining</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex justify-between gap-2 text-xs text-slate-500 mb-1 whitespace-nowrap">
+              <span className="truncate">{answered} answered</span>
+              <span className="truncate hidden sm:inline">{unanswered} remaining</span>
             </div>
             <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
               <div className="h-full bg-amber-500 rounded-full transition-all" style={{ width: `${(answered / questions.length) * 100}%` }} />
@@ -82,12 +82,12 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
           </div>
 
           {config.timeLimit > 0 && remaining !== null && (
-            <div className={`font-mono font-semibold text-sm tabular-nums ${timerColor}`}>{formatSeconds(remaining)}</div>
+            <div className={`font-mono font-semibold text-sm tabular-nums shrink-0 ${timerColor}`}>{formatSeconds(remaining)}</div>
           )}
 
-          <span className="text-sm text-slate-400 font-medium tabular-nums">{currentIdx + 1}/{questions.length}</span>
+          <span className="text-sm text-slate-400 font-medium tabular-nums shrink-0">{currentIdx + 1}/{questions.length}</span>
 
-          <button onClick={() => setShowSummary(true)} className="btn-ghost p-2" title="Summary">
+          <button onClick={() => setShowSummary(true)} className="btn-ghost p-2 shrink-0" title="Summary">
             <LayoutList className="w-5 h-5" />
           </button>
         </div>
@@ -132,7 +132,7 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
                       {String.fromCharCode(65 + i)}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <InlineText text={opt.text} />
+                      <OptionText text={opt.text} />
                       {opt.image && (
                         <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
                           className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />

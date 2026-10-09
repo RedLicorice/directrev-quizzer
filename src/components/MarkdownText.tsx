@@ -19,10 +19,35 @@ export function InlineText({ text }: { text: string }) {
   );
 }
 
+/** Multi-line text or source code (RAML, DataWeave, XML…) as opposed to a plain sentence. */
+export function looksLikeCode(text: string): boolean {
+  return text.includes('\n') || /^\s*(%dw\b|#%RAML|<\?xml|<[a-zA-Z][\w:.-]*[\s/>])/.test(text);
+}
+
+/**
+ * Answer option text: plain sentences keep inline backtick handling, code / multi-line text
+ * keeps its line breaks and indentation in a monospace block. Long unbroken tokens
+ * (URLs, DataWeave expressions) wrap instead of widening the card. Safe inside <button>.
+ */
+export function OptionText({ text }: { text: string }) {
+  if (looksLikeCode(text)) {
+    return (
+      <span className="block whitespace-pre-wrap font-mono text-[0.88em] leading-relaxed overflow-x-auto [overflow-wrap:anywhere]">
+        {text}
+      </span>
+    );
+  }
+  return (
+    <span className="[overflow-wrap:anywhere]">
+      <InlineText text={text} />
+    </span>
+  );
+}
+
 /** Full markdown for question body text (supports code, bold, italic, links) */
 export function QuestionMarkdown({ text, className = '' }: { text: string; className?: string }) {
   return (
-    <span className={className}>
+    <span className={`[overflow-wrap:anywhere] ${className}`}>
       <ReactMarkdown
         components={{
           // Prevent ReactMarkdown from wrapping in a block <p> — keep inline flow

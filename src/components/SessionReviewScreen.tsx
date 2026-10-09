@@ -9,6 +9,7 @@ import type { QuestionStatus } from './SummaryModal';
 import ReactMarkdown from 'react-markdown';
 import { notesKey } from '../utils/storage';
 import DatasetImage from './DatasetImage';
+import { QuestionMarkdown, OptionText } from './MarkdownText';
 import ExplanationBlock from './ExplanationBlock';
 
 interface Props {
@@ -100,7 +101,9 @@ export default function SessionReviewScreen({ record, onBack }: Props) {
             {q.selectCount > 1 && (
               <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">Select {q.selectCount} answers</p>
             )}
-            <p className="text-slate-100 text-base sm:text-lg leading-relaxed">{q.text}</p>
+            <p className="text-slate-100 text-base sm:text-lg leading-relaxed">
+              <QuestionMarkdown text={q.text} />
+            </p>
             {q.image && (
               <DatasetImage src={q.image} alt="Question diagram" className="mt-4 max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />
             )}
@@ -112,17 +115,21 @@ export default function SessionReviewScreen({ record, onBack }: Props) {
                 key={i}
                 className={`w-full text-left px-5 py-4 rounded-xl border transition-all duration-150 ${getOptionClass(i)}`}
               >
-                <span className={`inline-flex items-center justify-center w-6 h-6 rounded mr-3 text-xs font-bold shrink-0
-                  ${opt.correct ? 'bg-emerald-500 text-white' :
-                    selected.includes(i) ? 'bg-rose-500 text-white' :
-                    'bg-slate-700 text-slate-400'}`}>
-                  {String.fromCharCode(65 + i)}
-                </span>
-                {opt.text}
-                {opt.image && (
-                  <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
-                    className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />
-                )}
+                <div className="flex items-start gap-3">
+                  <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold shrink-0 mt-0.5
+                    ${opt.correct ? 'bg-emerald-500 text-white' :
+                      selected.includes(i) ? 'bg-rose-500 text-white' :
+                      'bg-slate-700 text-slate-400'}`}>
+                    {String.fromCharCode(65 + i)}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <OptionText text={opt.text} />
+                    {opt.image && (
+                      <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
+                        className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />
+                    )}
+                  </div>
+                </div>
               </div>
             ))}
           </div>

@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { X, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import type { Question } from '../types';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ReactMarkdown from 'react-markdown';
-import { QuestionMarkdown, InlineText } from './MarkdownText';
+import { QuestionMarkdown, OptionText } from './MarkdownText';
 import DatasetImage from './DatasetImage';
 import { notesKey } from '../utils/storage';
 import ExplanationBlock from './ExplanationBlock';
@@ -40,8 +40,28 @@ export default function FlashcardSession({ questions, onExit }: Props) {
     return () => window.removeEventListener('keydown', handler);
   }, [currentIdx, questions.length]);
 
-  const hasOptionImages = q.options.some((o) => o.image);
-  const cardHeight = Math.max(360, 100 + q.options.length * (hasOptionImages ? 120 : 56) + (q.image ? 200 : 0));
+  // The card takes the height of the visible face's content (both faces are absolutely
+  // positioned for the 3D flip, so they can't size the card themselves).
+  const frontRef = useRef<HTMLDivElement>(null);
+  const backRef = useRef<HTMLDivElement>(null);
+  const [faceHeights, setFaceHeights] = useState({ front: 0, back: 0 });
+
+  useLayoutEffect(() => {
+    const outer = (el: HTMLElement | null) => {
+      if (!el?.parentElement) return 0;
+      const cs = getComputedStyle(el.parentElement);
+      return el.offsetHeight + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+        + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+    };
+    const measure = () => setFaceHeights({ front: outer(frontRef.current), back: outer(backRef.current) });
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (frontRef.current) ro.observe(frontRef.current);
+    if (backRef.current) ro.observe(backRef.current);
+    return () => ro.disconnect();
+  }, [currentIdx]);
+
+  const cardHeight = Math.max(320, Math.ceil(flipped ? faceHeights.back : faceHeights.front));
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -76,72 +96,76 @@ export default function FlashcardSession({ questions, onExit }: Props) {
 
         <div
           className="flip-scene w-full max-w-2xl cursor-pointer"
-          style={{ height: `${cardHeight}px` }}
+          style={{ height: `${cardHeight}px`, transition: 'height 0.3s ease' }}
           onClick={() => setFlipped((f) => !f)}
         >
           <div className={`flip-card w-full h-full ${flipped ? 'flipped' : ''}`}>
             {/* Front */}
-            <div className="flip-face card flex flex-col items-center justify-center p-8 sm:p-12">
-              <span className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">Question</span>
-              {q.selectCount > 1 && (
-                <span className="text-xs font-semibold text-amber-400 mb-3">
-                  Select {q.selectCount} answers
-                </span>
-              )}
-              <p className="text-slate-100 text-base sm:text-xl text-center leading-relaxed font-medium">
-                <QuestionMarkdown text={q.text} />
-              </p>
-              {q.image && (
-                <DatasetImage src={q.image} alt="Question diagram" className="mt-4 max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '300px' }} />
-              )}
+            <div className="flip-face card flex flex-col items-center justify-center p-6 sm:p-12">
+              <div ref={frontRef} className="w-full flex flex-col items-center">
+                <span className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">Question</span>
+                {q.selectCount > 1 && (
+                  <span className="text-xs font-semibold text-amber-400 mb-3">
+                    Select {q.selectCount} answers
+                  </span>
+                )}
+                <p className="text-slate-100 text-base sm:text-xl text-center leading-relaxed font-medium">
+                  <QuestionMarkdown text={q.text} />
+                </p>
+                {q.image && (
+                  <DatasetImage src={q.image} alt="Question diagram" className="mt-4 max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '300px' }} />
+                )}
+              </div>
             </div>
 
             {/* Back — all options with correct/wrong styling */}
             <div className="flip-face flip-face-back card flex flex-col p-5 sm:p-7 overflow-y-auto">
-              <span className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3 text-center shrink-0">
-                Answers
-              </span>
+              <div ref={backRef} className="flex flex-col">
+                <span className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3 text-center shrink-0">
+                  Answers
+                </span>
 
-              <div className="space-y-2 shrink-0">
-                {q.options.map((opt, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-start gap-2.5 rounded-xl px-4 py-2.5 text-sm border
-                      ${opt.correct
-                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
-                        : 'bg-slate-700/30 border-slate-700/40 text-slate-500'
-                      }`}
-                  >
-                    <span className={`mt-0.5 shrink-0 font-bold text-xs ${opt.correct ? 'text-emerald-400' : 'text-slate-600'}`}>
-                      {opt.correct ? '✓' : '✗'}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <InlineText text={opt.text} />
-                      {opt.image && (
-                        <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
-                          className="mt-1.5 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '200px' }} />
-                      )}
+                <div className="space-y-2 shrink-0">
+                  {q.options.map((opt, i) => (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-2.5 rounded-xl px-4 py-2.5 text-sm border
+                        ${opt.correct
+                          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                          : 'bg-slate-700/30 border-slate-700/40 text-slate-500'
+                        }`}
+                    >
+                      <span className={`mt-0.5 shrink-0 font-bold text-xs ${opt.correct ? 'text-emerald-400' : 'text-slate-600'}`}>
+                        {opt.correct ? '✓' : '✗'}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <OptionText text={opt.text} />
+                        {opt.image && (
+                          <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
+                            className="mt-1.5 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '200px' }} />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 shrink-0"><ExplanationBlock q={q} /></div>
+
+                {noteText && (
+                  <div className="mt-4 border-t border-slate-700/50 pt-4 shrink-0">
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2">My Notes</p>
+                    <div className="prose prose-invert prose-sm max-w-none text-slate-300">
+                      <ReactMarkdown>{noteText}</ReactMarkdown>
                     </div>
                   </div>
-                ))}
+                )}
+
+                {!noteText && (
+                  <p className="pt-4 text-center text-xs text-slate-600">
+                    No notes · add them in Practice mode
+                  </p>
+                )}
               </div>
-
-              <div className="mt-4 shrink-0"><ExplanationBlock q={q} /></div>
-
-              {noteText && (
-                <div className="mt-4 border-t border-slate-700/50 pt-4 shrink-0">
-                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2">My Notes</p>
-                  <div className="prose prose-invert prose-sm max-w-none text-slate-300">
-                    <ReactMarkdown>{noteText}</ReactMarkdown>
-                  </div>
-                </div>
-              )}
-
-              {!noteText && (
-                <p className="mt-auto pt-4 text-center text-xs text-slate-600">
-                  No notes · add them in Practice mode
-                </p>
-              )}
             </div>
           </div>
         </div>
