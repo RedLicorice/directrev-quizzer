@@ -1,0 +1,8 @@
+node_modules/
+lambda/auth/dist/
+.build/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
