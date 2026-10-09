@@ -138,7 +138,7 @@ body>`; for the empty body that is `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b
 | `GET /auth/callback?code&state` | PKCE cookie | **302** to `https://<app-host><return>`; sets `__Host-qz_session` + `__Secure-qz_refresh`; clears PKCE | **400** HTML (missing/expired PKCE cookie, state mismatch, `error=` from Cognito, failed code exchange); **403** HTML "Accesso non abilitato" when the user has no `ds-*`/`ds-all`/`admin` group (refresh token revoked, no session cookie) |
 | `POST /auth/refresh` | refresh cookie, empty body | **200** body = `/auth/me` body; new `__Host-qz_session` | **401** `{"error":"no_refresh"}` (no cookie); **401** `{"error":"refresh_failed"}` + both cookies cleared (revoked/expired token, disabled/deleted user); **403** `{"error":"not_enabled"}` + cookies cleared (groups removed); **403** `{"error":"bad_origin"}` (`Origin`/`Sec-Fetch-Site` not same-origin); **503** `{"error":"upstream"}` (Cognito 5xx/unreachable: cookies are kept, retry later); **405** for GET |
 | `GET /auth/me` | session cookie | **200** `{"sub","email","name"?,"ds","adm","exp","allDatasets"?}` | **401** `{"error":"unauthenticated"}` |
-| `GET` or `POST /auth/logout` | cookies | revokes the refresh token at Cognito (best effort), clears session + refresh + PKCE cookies, **302** to `https://<cognito-domain>/logout?client_id=..&logout_uri=https://<app-host>/signed-out.html` | never fails |
+| `GET` or `POST /auth/logout` | cookies | revokes the refresh token at Cognito (best effort), clears session + refresh + PKCE cookies, sends `Clear-Site-Data: "cache"` (never `"storage"`: local progress must survive), **302** to `https://<cognito-domain>/logout?client_id=..&logout_uri=https://<app-host>/signed-out.html` | never fails |
 | anything else under `/auth/` | | | **404** `{"error":"not_found"}` |
 | any route, unexpected failure (SSM/KVS unreachable, malformed ID token) | | | **500** `{"error":"internal"}` |
 
@@ -178,3 +178,28 @@ The Lambda reads it at cold start (cache 5 min). Environment variables of the La
 `ds-<datasetId>` (one per dataset), `ds-all`, `admin`. Created by Terraform; membership managed with
 `infra/scripts/invite-user.sh` / `offboard-user.sh` (later by the admin UI, M7). Group changes take effect at the
 next refresh (<= 30 min).
+
+## 8. Response headers (CloudFront response headers policies)
+
+Every behavior: `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`, `X-Content-Type-Options:
+nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(),
+microphone=(), geolocation=()`, `Cross-Origin-Opener-Policy: same-origin` and the CSP of plan v1 §D:
+
+```
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
+```
+
+(`https:` in `connect-src`/`img-src` keeps the "Avanzate" GitHub/URL sources working; it is the Terraform variable
+`content_security_policy` of `modules/edge` and can be narrowed to `https://api.github.com https://raw.githubusercontent.com`.)
+`/data/*` additionally gets `Cache-Control: private, no-cache` (overriding S3), so the browser revalidates through
+CloudFront and the session check every time. Edge cache key for `/data/*`: no cookies, headers or query strings.
+
+## 9. CI variables (outputs of `infra/live/app`, `terraform output github_variables`)
+
+| Repository | Variables (GitHub repository or `prod` environment variables, not secrets) | Role trust (`sub`) | Permissions |
+|---|---|---|---|
+| `RedLicorice/directrev-quizzer` | `AWS_ROLE_ARN`, `AWS_REGION`, `APP_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID` | `repo:RedLicorice/directrev-quizzer:environment:prod` | app bucket (list/put/get/delete), invalidations of the distribution |
+| `RedLicorice/quizzer-dataset-<id>` | `AWS_ROLE_ARN`, `AWS_REGION`, `DATA_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID` | `repo:RedLicorice/quizzer-dataset-<id>:environment:prod` | `s3://<DATA_BUCKET>/data/<id>/*` only (list with `s3:prefix` `data/<id>/`), invalidations |
+
+The deploy jobs must run in a GitHub environment named `prod` (`environment: prod`) and have
+`permissions: id-token: write`.

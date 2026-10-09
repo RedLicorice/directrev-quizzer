@@ -310,6 +310,7 @@ describe('/auth/me and logout', () => {
     expect(u.searchParams.get('logout_uri')).toBe(`${APP}/signed-out.html`);
     expect(u.searchParams.get('client_id')).toBe(CONFIG.clientId);
     expect([...t.cognito.refresh.values()].every((x) => x.revoked)).toBe(true);
+    expect(r.headers['clear-site-data']).toBe('"cache"');
     for (const n of ['__Host-qz_session', '__Secure-qz_refresh', '__Secure-qz_pkce']) expect(cookieOf(r.cookies, n)).toMatch(/Max-Age=0/);
   });
 

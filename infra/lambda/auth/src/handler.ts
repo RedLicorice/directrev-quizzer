@@ -250,7 +250,11 @@ export function createHandler(deps: Deps) {
         const rt = cookies.getCookie(ev.cookies, cookies.REFRESH_COOKIE);
         if (rt) await revokeToken(deps.fetch, cfg, rt).catch(() => undefined);
         deps.log({ evt: 'logout', ip, revoked: !!rt });
-        return redirect(logoutUrl(cfg, appHost), clearAll());
+        const r = redirect(logoutUrl(cfg, appHost), clearAll());
+        // Drop the HTTP cache of this origin (cached /data responses). Never "storage":
+        // it would wipe the local progress of every user of this browser.
+        r.headers['clear-site-data'] = '"cache"';
+        return r;
       }
 
       return json(404, { error: 'not_found' });
