@@ -86,8 +86,8 @@ run "full_stack" {
     condition = jsondecode(aws_ssm_parameter.config.value) == {
       userPoolId        = "eu-central-1_TESTPOOL"
       clientId          = "testclientid123"
-      cognitoDomain     = "quizzer-x7k2.auth.eu-central-1.amazoncognito.com"
-      region            = "eu-central-1"
+      cognitoDomain     = "quizzer-x7k2.auth.us-east-1.amazoncognito.com"
+      region            = "us-east-1"
       appHosts          = ["d111111abcdef8.cloudfront.net"]
       datasets          = ["aws-dva-c02", "mule-mcd-01"]
       sessionTtlSeconds = 1800
@@ -107,19 +107,19 @@ run "full_stack" {
     condition = output.github_variables == {
       "RedLicorice/directrev-quizzer" = {
         AWS_ROLE_ARN               = "arn:aws:iam::123456789012:role/quizzer-prod-app-publisher"
-        AWS_REGION                 = "eu-central-1"
+        AWS_REGION                 = "us-east-1"
         APP_BUCKET                 = "quizzer-prod-app-123456789012"
         CLOUDFRONT_DISTRIBUTION_ID = "E1TESTDIST"
       }
       "RedLicorice/quizzer-dataset-aws-dva-c02" = {
         AWS_ROLE_ARN               = "arn:aws:iam::123456789012:role/quizzer-prod-ds-publisher"
-        AWS_REGION                 = "eu-central-1"
+        AWS_REGION                 = "us-east-1"
         DATA_BUCKET                = "quizzer-prod-data-123456789012"
         CLOUDFRONT_DISTRIBUTION_ID = "E1TESTDIST"
       }
       "RedLicorice/quizzer-dataset-mule-mcd-01" = {
         AWS_ROLE_ARN               = "arn:aws:iam::123456789012:role/quizzer-prod-ds-publisher"
-        AWS_REGION                 = "eu-central-1"
+        AWS_REGION                 = "us-east-1"
         DATA_BUCKET                = "quizzer-prod-data-123456789012"
         CLOUDFRONT_DISTRIBUTION_ID = "E1TESTDIST"
       }

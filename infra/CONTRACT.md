@@ -33,7 +33,7 @@ Dataset id syntax: `^[a-z0-9][a-z0-9-]{0,62}$` (lower case; `/data/AWS-DVA-C02/.
 | `__Secure-qz_refresh` | Cognito refresh token (opaque) | `Path=/auth; Secure; HttpOnly; SameSite=Strict; Max-Age=2592000` (30 days) | `/auth/callback` (and `/auth/refresh` only if Cognito rotates it) |
 | `__Secure-qz_pkce` | `base64url(JSON{s,v,r,e}) + "." + HMAC` (state, PKCE verifier, return path, expiry) | `Path=/auth; Secure; HttpOnly; SameSite=Lax; Max-Age=600` | `/auth/login`; cleared by `/auth/callback` |
 
-- The PKCE cookie must be `Lax`: the return from `<prefix>.auth.eu-central-1.amazoncognito.com` is a cross-site
+- The PKCE cookie must be `Lax`: the return from `<prefix>.auth.us-east-1.amazoncognito.com` is a cross-site
   top-level navigation (plan v2 §2.1).
 - Clearing = same name, same `Path`, empty value, `Max-Age=0` (plus `Secure; HttpOnly; SameSite=...`).
 - No JavaScript ever sees a token. The SPA only calls `/auth/me` and `/auth/refresh` and navigates to
@@ -159,10 +159,10 @@ body>`; for the empty body that is `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b
 
 ```json
 {
-  "userPoolId": "eu-central-1_XXXXXXXXX",
+  "userPoolId": "us-east-1_XXXXXXXXX",
   "clientId": "xxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "cognitoDomain": "quizzer-xxxx.auth.eu-central-1.amazoncognito.com",
-  "region": "eu-central-1",
+  "cognitoDomain": "quizzer-xxxx.auth.us-east-1.amazoncognito.com",
+  "region": "us-east-1",
   "appHosts": ["dXXXXXXXXXXXXX.cloudfront.net"],
   "datasets": ["aws-dva-c02", "mule-mcd-01"],
   "sessionTtlSeconds": 1800,

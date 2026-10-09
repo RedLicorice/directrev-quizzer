@@ -1,6 +1,6 @@
 mock_provider "aws" {
   mock_resource "aws_s3_bucket" {
-    defaults = { arn = "arn:aws:s3:::quizzer-tfstate-123456789012-eu-central-1" }
+    defaults = { arn = "arn:aws:s3:::quizzer-tfstate-123456789012-us-east-1" }
   }
 }
 
@@ -11,7 +11,7 @@ variables {
 run "state_bucket" {
   command = apply
   assert {
-    condition     = aws_s3_bucket.state.bucket == "quizzer-tfstate-123456789012-eu-central-1"
+    condition     = aws_s3_bucket.state.bucket == "quizzer-tfstate-123456789012-us-east-1"
     error_message = "Bucket name quizzer-tfstate-<account>-<region>."
   }
   assert {

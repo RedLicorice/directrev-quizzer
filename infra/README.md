@@ -20,7 +20,7 @@ infra/
   lambda/auth/             Lambda auth in TypeScript (src/, test/, build.mjs -> dist/index.mjs)
   bootstrap/               bucket dello stato Terraform (stato locale, poi migrate-state)
   modules/                 edge, site, identity, lambdas, ci (ognuno con tests/*.tftest.hcl)
-  live/app/                root principale (provider aws, eu-central-1)
+  live/app/                root principale (provider aws, us-east-1)
   scripts/                 rotate-session-key, invite-user, offboard-user, check-plan, tf-check
 ```
 
@@ -37,11 +37,11 @@ infra/
 | `gh` (opzionale) | | per impostare le variabili GitHub da riga di comando |
 
 Credenziali: un profilo con permessi di amministratore sull'account (IAM Identity Center/SSO consigliato), regione
-`eu-central-1`. Verifica:
+`us-east-1`. Verifica:
 
 ```bash
 export AWS_PROFILE=quizzer-admin        # il tuo profilo
-export AWS_REGION=eu-central-1
+export AWS_REGION=us-east-1
 aws sts get-caller-identity             # annota l'Account (12 cifre)
 ```
 
@@ -77,10 +77,10 @@ npm run build         # = build:edge (edge/session-check.js) + build:lambda (lam
 cd infra/bootstrap
 cat > terraform.tfvars <<EOF
 account_id = "123456789012"
-region     = "eu-central-1"
+region     = "us-east-1"
 EOF
 terraform init
-terraform apply                     # crea quizzer-tfstate-<account>-eu-central-1 (stato ancora locale)
+terraform apply                     # crea quizzer-tfstate-<account>-us-east-1 (stato ancora locale)
 terraform output -raw backend_hcl > backend.hcl
 ```
 
@@ -106,7 +106,7 @@ Variabili principali (`terraform.tfvars`):
 | Variabile | Esempio | Note |
 |---|---|---|
 | `account_id` | `"123456789012"` | niente lookup `aws_caller_identity`: plan e test non dipendono dall'account; `allowed_account_ids` impedisce di applicare sull'account sbagliato |
-| `cognito_domain_prefix` | `"quizzer-x7k2"` | dominio di login `<prefix>.auth.eu-central-1.amazoncognito.com`, unico al mondo; non deve contenere `aws`, `amazon`, `cognito` |
+| `cognito_domain_prefix` | `"quizzer-x7k2"` | dominio di login `<prefix>.auth.us-east-1.amazoncognito.com`, unico al mondo; non deve contenere `aws`, `amazon`, `cognito` |
 | `admin_email` | `"tu@example.com"` | avvisi del budget |
 | `budget_amount_usd` | `5` | |
 | `dataset_ids` | `["aws-dva-c02", "mule-mcd-01"]` | repo `RedLicorice/quizzer-dataset-<id>`, gruppi `ds-<id>`, ruoli CI |
@@ -304,7 +304,7 @@ La CloudFront Function associata va prima staccata dalla distribuzione: `destroy
 cancellazione della distribuzione richiede che sia disabilitata (Terraform la disabilita e aspetta: 10-20 minuti).
 Svuotare un bucket con versioning dalla console ("Empty") è il modo più semplice.
 
-## 16. Costi stimati (circa 20 utenti, eu-central-1)
+## 16. Costi stimati (circa 20 utenti, us-east-1)
 
 | Voce | Uso | Costo |
 |---|---|---|
