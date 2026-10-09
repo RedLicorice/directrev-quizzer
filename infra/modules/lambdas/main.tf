@@ -10,6 +10,7 @@ locals {
 }
 
 resource "aws_cloudwatch_log_group" "auth" {
+  #checkov:skip=CKV_AWS_158:logs contain no tokens or secrets; KMS would add cost and key management
   name              = "/aws/lambda/${local.function_name}"
   retention_in_days = var.log_retention_days
 }
@@ -61,6 +62,11 @@ resource "aws_iam_role_policy" "auth" {
 }
 
 resource "aws_lambda_function" "auth" {
+  #checkov:skip=CKV_AWS_116:synchronous invocations only (Function URL): a DLQ never receives anything
+  #checkov:skip=CKV_AWS_117:no VPC: the function only calls public AWS/Cognito endpoints
+  #checkov:skip=CKV_AWS_173:env vars hold no secrets (parameter name and KVS ARN); default AWS-managed encryption
+  #checkov:skip=CKV_AWS_272:no code signing for a single-operator deployment
+  #checkov:skip=CKV_AWS_50:no X-Ray tracing (cost/noise); structured logs in CloudWatch
   function_name                  = local.function_name
   description                    = "Quizzer /auth/*: Cognito PKCE login and session cookies"
   role                           = aws_iam_role.auth.arn

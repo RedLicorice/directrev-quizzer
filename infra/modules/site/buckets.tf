@@ -11,10 +11,20 @@ locals {
 }
 
 resource "aws_s3_bucket" "app" {
+  #checkov:skip=CKV_AWS_18:S3 server access logs not needed: reads go through CloudFront (logged), writes via CloudTrail
+  #checkov:skip=CKV_AWS_144:no cross-region replication (cost; data is rebuilt from the git repos)
+  #checkov:skip=CKV_AWS_145:SSE-S3 on purpose: SSE-KMS with OAC needs extra key policies and costs per request
+  #checkov:skip=CKV2_AWS_62:no S3 event notifications needed
+  #checkov:skip=CKV2_AWS_6:PAB is set by aws_s3_bucket_public_access_block.this (for_each, not resolved by checkov; asserted in tests/site.tftest.hcl)
   bucket = local.buckets.app
 }
 
 resource "aws_s3_bucket" "data" {
+  #checkov:skip=CKV_AWS_18:S3 server access logs not needed: reads go through CloudFront (logged), writes via CloudTrail
+  #checkov:skip=CKV_AWS_144:no cross-region replication (cost; data is rebuilt from the git repos)
+  #checkov:skip=CKV_AWS_145:SSE-S3 on purpose: SSE-KMS with OAC needs extra key policies and costs per request
+  #checkov:skip=CKV2_AWS_62:no S3 event notifications needed
+  #checkov:skip=CKV2_AWS_6:PAB is set by aws_s3_bucket_public_access_block.this (for_each, not resolved by checkov; asserted in tests/site.tftest.hcl)
   bucket = local.buckets.data
   lifecycle {
     prevent_destroy = true
@@ -22,6 +32,12 @@ resource "aws_s3_bucket" "data" {
 }
 
 resource "aws_s3_bucket" "logs" {
+  #checkov:skip=CKV_AWS_18:S3 server access logs not needed: reads go through CloudFront (logged), writes via CloudTrail
+  #checkov:skip=CKV_AWS_144:no cross-region replication (cost; data is rebuilt from the git repos)
+  #checkov:skip=CKV_AWS_145:SSE-S3 on purpose: SSE-KMS with OAC needs extra key policies and costs per request
+  #checkov:skip=CKV2_AWS_62:no S3 event notifications needed
+  #checkov:skip=CKV2_AWS_6:PAB is set by aws_s3_bucket_public_access_block.this (for_each, not resolved by checkov; asserted in tests/site.tftest.hcl)
+  #checkov:skip=CKV_AWS_21:log bucket: objects expire after 90 days, versioning not useful
   bucket = local.logs_bucket
 }
 
@@ -60,6 +76,7 @@ resource "aws_s3_bucket_ownership_controls" "data" {
 # ACLs enabled on the target bucket:
 # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/standard-logging-legacy-s3.html
 resource "aws_s3_bucket_ownership_controls" "logs" {
+  #checkov:skip=CKV2_AWS_65:CloudFront standard logging (legacy) requires ACLs on the target bucket
   bucket = aws_s3_bucket.logs.id
   rule {
     object_ownership = "BucketOwnerPreferred"

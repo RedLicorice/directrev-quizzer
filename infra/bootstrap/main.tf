@@ -20,6 +20,10 @@ variable "noncurrent_state_days" {
 # Terraform/OpenTofu state bucket (S3 backend with native lockfile, no DynamoDB):
 # https://developer.hashicorp.com/terraform/language/backend/s3
 resource "aws_s3_bucket" "state" {
+  #checkov:skip=CKV_AWS_18:state bucket access is logged by CloudTrail management events; S3 access logs not needed
+  #checkov:skip=CKV_AWS_144:no cross-region replication for a single-operator state bucket
+  #checkov:skip=CKV_AWS_145:SSE-S3 is sufficient: the state contains no secrets (HMAC keys live only in the KVS)
+  #checkov:skip=CKV2_AWS_62:no S3 event notifications needed
   bucket = "quizzer-tfstate-${var.account_id}-${var.region}"
   lifecycle {
     prevent_destroy = true

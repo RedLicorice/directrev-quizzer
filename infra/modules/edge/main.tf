@@ -33,6 +33,7 @@ resource "aws_cloudfront_response_headers_policy" "app" {
     strict_transport_security {
       access_control_max_age_sec = local.security_headers.hsts_max_age
       include_subdomains         = true
+      preload                    = true
       override                   = true
     }
     content_type_options {
@@ -76,6 +77,7 @@ resource "aws_cloudfront_response_headers_policy" "data" {
     strict_transport_security {
       access_control_max_age_sec = local.security_headers.hsts_max_age
       include_subdomains         = true
+      preload                    = true
       override                   = true
     }
     content_type_options {

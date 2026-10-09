@@ -7,10 +7,6 @@ variable "account_id" {
   type        = string
 }
 
-variable "region" {
-  type = string
-}
-
 variable "session_check_function_arn" {
   type = string
 }

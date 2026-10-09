@@ -26,7 +26,6 @@ mock_provider "aws" {
 variables {
   name_prefix                     = "quizzer-test"
   account_id                      = "123456789012"
-  region                          = "eu-central-1"
   session_check_function_arn      = "arn:aws:cloudfront::123456789012:function/quizzer-test-session-check"
   app_response_headers_policy_id  = "app-rhp"
   data_response_headers_policy_id = "data-rhp"

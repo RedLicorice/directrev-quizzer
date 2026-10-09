@@ -39,6 +39,13 @@ resource "aws_cloudfront_origin_access_control" "lambda" {
 }
 
 resource "aws_cloudfront_distribution" "this" {
+  #checkov:skip=CKV_AWS_68:no WAF (cost ~6 USD/month > budget); edge auth + OAC protect the origins
+  #checkov:skip=CKV2_AWS_47:no WAF (see CKV_AWS_68)
+  #checkov:skip=CKV_AWS_174:default *.cloudfront.net certificate forces TLSv1 policy (plan v2 §2.2), fixed with a custom domain in M10
+  #checkov:skip=CKV2_AWS_42:phase 1 uses the default CloudFront certificate (no custom domain)
+  #checkov:skip=CKV_AWS_310:single origin per path, no failover needed
+  #checkov:skip=CKV_AWS_374:no geo restriction: colleagues may travel; access is invite-only
+  #checkov:skip=CKV2_AWS_32:response headers policies are attached to every behavior (ids come from module.edge; asserted in tests)
   enabled             = true
   is_ipv6_enabled     = true
   http_version        = "http2and3"

@@ -31,6 +31,7 @@ run "response_headers" {
     condition = alltrue([for p in [aws_cloudfront_response_headers_policy.app, aws_cloudfront_response_headers_policy.data] :
       p.security_headers_config[0].strict_transport_security[0].access_control_max_age_sec == 63072000 &&
       p.security_headers_config[0].strict_transport_security[0].include_subdomains &&
+      p.security_headers_config[0].strict_transport_security[0].preload &&
       p.security_headers_config[0].content_type_options[0].override &&
       p.security_headers_config[0].frame_options[0].frame_option == "DENY" &&
       p.security_headers_config[0].referrer_policy[0].referrer_policy == "strict-origin-when-cross-origin"

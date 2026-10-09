@@ -38,7 +38,6 @@ module "site" {
   source                          = "../../modules/site"
   name_prefix                     = local.name_prefix
   account_id                      = var.account_id
-  region                          = var.region
   session_check_function_arn      = module.edge.function_arn
   app_response_headers_policy_id  = module.edge.app_response_headers_policy_id
   data_response_headers_policy_id = module.edge.data_response_headers_policy_id
@@ -59,6 +58,7 @@ module "identity" {
 # Runtime config of the auth Lambda (CONTRACT.md §6). It depends on the client and the
 # distribution; the Lambda only knows its *name*, which breaks the dependency cycle.
 resource "aws_ssm_parameter" "config" {
+  #checkov:skip=CKV2_AWS_34:public, non-secret config (ids and host names); a SecureString would need KMS permissions
   name        = local.config_parameter
   description = "Quizzer auth Lambda runtime config (no secrets)"
   type        = "String"
