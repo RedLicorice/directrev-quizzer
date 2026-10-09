@@ -4,7 +4,7 @@ import type { Question, SessionConfig, SessionResult } from '../types';
 import { useTimer, formatSeconds } from '../hooks/useTimer';
 import SummaryModal from './SummaryModal';
 import type { QuestionStatus } from './SummaryModal';
-import { QuestionMarkdown, InlineText } from './MarkdownText';
+import { QuestionMarkdown, OptionText } from './MarkdownText';
 import DatasetImage from './DatasetImage';
 
 interface Props {
@@ -132,7 +132,7 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
                       {String.fromCharCode(65 + i)}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <InlineText text={opt.text} />
+                      <OptionText text={opt.text} />
                       {opt.image && (
                         <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
                           className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />

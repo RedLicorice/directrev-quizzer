@@ -3,6 +3,7 @@ import { Home, RotateCcw, ChevronDown, ChevronUp, CheckCircle2, XCircle } from '
 import type { SessionResult } from '../types';
 import { calculateScore, isAnswerCorrect } from '../utils/scoring';
 import { formatSeconds } from '../hooks/useTimer';
+import { OptionText } from './MarkdownText';
 
 interface Props {
   result: SessionResult;
@@ -108,9 +109,11 @@ export default function ResultsScreen({ result, onHome, onRetry }: Props) {
                         else cls += 'text-slate-500';
 
                         return (
-                          <div key={j} className={cls}>
-                            {opt.correct ? '✓ ' : wasSelected ? '✗ ' : '  '}
-                            {opt.text}
+                          <div key={j} className={`flex gap-1.5 ${cls}`}>
+                            <span className="shrink-0 w-3">{opt.correct ? '✓' : wasSelected ? '✗' : ''}</span>
+                            <div className="flex-1 min-w-0">
+                              <OptionText text={opt.text} />
+                            </div>
                           </div>
                         );
                       })}

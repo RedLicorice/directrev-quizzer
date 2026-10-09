@@ -7,7 +7,7 @@ import { statsKey, notesKey, practiceDraftKey } from '../utils/storage';
 import SummaryModal from './SummaryModal';
 import type { QuestionStatus } from './SummaryModal';
 import ReactMarkdown from 'react-markdown';
-import { QuestionMarkdown, InlineText } from './MarkdownText';
+import { QuestionMarkdown, OptionText } from './MarkdownText';
 import DatasetImage from './DatasetImage';
 import ExplanationBlock from './ExplanationBlock';
 
@@ -246,7 +246,7 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
                     {String.fromCharCode(65 + i)}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <InlineText text={opt.text} />
+                    <OptionText text={opt.text} />
                     {opt.image && (
                       <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
                         className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />
