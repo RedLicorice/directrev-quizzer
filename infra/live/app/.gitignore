@@ -1,0 +1,6 @@
+.terraform/
+.build/
+backend.hcl
+terraform.tfvars
+*.tfplan
+plan.json
