@@ -31,7 +31,7 @@ export default function ResultsScreen({ result, onHome, onRetry }: Props) {
               {passed ? '🎉 Passed!' : '❌ Not passed'}
             </div>
 
-            <div className="flex justify-center gap-8 text-sm text-slate-400">
+            <div className="flex flex-wrap justify-center gap-x-6 gap-y-3 sm:gap-8 text-sm text-slate-400">
               <div className="text-center">
                 <div className="text-2xl font-bold text-emerald-400">{correct}</div>
                 <div>Correct</div>
@@ -95,7 +95,7 @@ export default function ResultsScreen({ result, onHome, onRetry }: Props) {
                     ) : (
                       <XCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
                     )}
-                    <span className="flex-1 text-sm text-slate-300 leading-snug line-clamp-2">{q.text}</span>
+                    <span className="flex-1 min-w-0 text-sm text-slate-300 leading-snug line-clamp-2 [overflow-wrap:anywhere]">{q.text}</span>
                     {expanded ? <ChevronUp className="w-4 h-4 text-slate-500 shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />}
                   </button>
 

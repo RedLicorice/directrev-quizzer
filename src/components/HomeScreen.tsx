@@ -102,7 +102,7 @@ export default function HomeScreen({
         </p>
 
         {/* Questions status */}
-        <div className="mt-3 inline-flex items-center gap-2 text-sm">
+        <div className="mt-3 inline-flex flex-wrap items-center justify-center gap-2 text-sm max-w-full">
           {loadError ? (
             <span className="flex items-center gap-1.5 text-amber-400">
               <AlertTriangle className="w-4 h-4" />
@@ -118,7 +118,7 @@ export default function HomeScreen({
             </span>
           ) : null}
           {datasetError && !showDatasets && (
-            <span className="flex items-center gap-1.5 text-amber-400 text-xs max-w-md text-left">
+            <span className="flex items-center gap-1.5 text-amber-400 text-xs max-w-md min-w-0 text-left [overflow-wrap:anywhere]">
               <AlertTriangle className="w-4 h-4 shrink-0" /> {datasetError}
             </span>
           )}
