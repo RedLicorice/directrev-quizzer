@@ -12,7 +12,7 @@
 # Env: KVS_ARN (default: terraform output kvs_arn), WAIT_SECONDS (default 60), AWS_PROFILE...
 # KVS API: https://docs.aws.amazon.com/cli/latest/reference/cloudfront-keyvaluestore/
 set -euo pipefail
-# shellcheck source=lib.sh
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 need aws
 need jq

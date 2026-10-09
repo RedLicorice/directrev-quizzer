@@ -11,7 +11,7 @@
 # it requires --confirm-mcd (plan v2 §6).
 # Env: USER_POOL_ID (default: terraform output user_pool_id).
 set -euo pipefail
-# shellcheck source=lib.sh
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 need aws
 

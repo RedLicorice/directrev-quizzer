@@ -7,7 +7,7 @@
 #   offboard-user.sh --delete mario.rossi@example.com   # also delete the user (irreversible)
 # Env: USER_POOL_ID (default: terraform output user_pool_id).
 set -euo pipefail
-# shellcheck source=lib.sh
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 need aws
 
