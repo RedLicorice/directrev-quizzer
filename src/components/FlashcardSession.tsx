@@ -4,6 +4,9 @@ import type { Question } from '../types';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import ReactMarkdown from 'react-markdown';
 import { QuestionMarkdown, InlineText } from './MarkdownText';
+import DatasetImage from './DatasetImage';
+import { notesKey } from '../utils/storage';
+import ExplanationBlock from './ExplanationBlock';
 
 interface Props {
   questions: Question[];
@@ -13,7 +16,7 @@ interface Props {
 export default function FlashcardSession({ questions, onExit }: Props) {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [notes] = useLocalStorage<Record<string, string>>('quizzer_notes', {});
+  const [notes] = useLocalStorage<Record<string, string>>(notesKey(), {});
 
   const q = questions[currentIdx];
   const noteText = notes[String(q.id)] ?? '';
@@ -89,7 +92,7 @@ export default function FlashcardSession({ questions, onExit }: Props) {
                 <QuestionMarkdown text={q.text} />
               </p>
               {q.image && (
-                <img src={q.image} alt="Question diagram" className="mt-4 max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '300px' }} />
+                <DatasetImage src={q.image} alt="Question diagram" className="mt-4 max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '300px' }} />
               )}
             </div>
 
@@ -115,13 +118,15 @@ export default function FlashcardSession({ questions, onExit }: Props) {
                     <div className="flex-1 min-w-0">
                       <InlineText text={opt.text} />
                       {opt.image && (
-                        <img src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
+                        <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + i)}`}
                           className="mt-1.5 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '200px' }} />
                       )}
                     </div>
                   </div>
                 ))}
               </div>
+
+              <div className="mt-4 shrink-0"><ExplanationBlock q={q} /></div>
 
               {noteText && (
                 <div className="mt-4 border-t border-slate-700/50 pt-4 shrink-0">

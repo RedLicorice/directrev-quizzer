@@ -19,9 +19,10 @@ Bundled with 387 unique questions from the [Ditectrev open-source question bank]
 
 ### Data management
 
-- **Backup** — one-click export of all questions + notes into a single JSON file
-- **Restore** — selectively restore questions, notes, or both from a backup; or load a new question set from a raw questions JSON or a Ditectrev-format `README.md`
-- **Persisted imports** — custom question sets survive page reloads (stored in `localStorage`)
+- **Datasets from a git repo / static host** — questions, images and explanations live in a separate data repo (or any static URL); the app loads them at runtime (see [Datasets](#datasets))
+- **Per-dataset progress** — stats, notes, session history and practice drafts are stored locally *per dataset*
+- **Backup** — one-click export of the current dataset's notes + stats into a JSON file
+- **Restore** — restore notes and stats from a backup; a raw questions JSON or Ditectrev `README.md` can still be opened for the current session (not saved)
 - All destructive operations require an explicit second confirmation
 
 ### PWA
@@ -77,44 +78,60 @@ npm run preview     # preview the production build locally
 
 ---
 
-## Using custom questions
+## Datasets
 
-AWS Quizzer is not tied to any specific question bank. You can load your own questions in two ways:
+Questions are **not** persisted in the browser. The app ships with one bundled dataset (AWS DVA-C02, works offline) and can load more from any number of *sources*:
 
-### Option A — Import in-app
-
-Click **Backup · Restore · Import** on the home screen, then choose a file:
-
-| File type | What happens |
+| Source | Use for |
 |---|---|
-| `questions.json` (array) | Questions loaded and persisted in `localStorage` |
-| Backup `.json` (exported by this app) | Choose to restore questions, notes, or both |
-| Ditectrev `README.md` | Parsed client-side; questions loaded and persisted |
+| **GitHub repo** (`owner/repo`, branch/tag, optional folder) | public repos are read from `raw.githubusercontent.com`; private repos need a fine-grained **read-only token** (Contents: read) and are read through the GitHub API |
+| **Static URL** | any CORS-enabled static host (GitHub Pages, S3, …) |
 
-### Option B — Replace the bundled data
+Open **Datasets** on the home screen → *Add a source*. Sources (and tokens) are stored in this browser only.
 
-Run the parser with your own Ditectrev-format markdown file:
+### Layout of a source
 
-```bash
-node scripts/parse-questions.mjs my-questions/README.md src/data/questions.json
-npm run build
+```
+index.json
+<dataset-id>/questions.json
+<dataset-id>/images/...        # referenced by relative path
 ```
 
-### Question JSON format
+```jsonc
+// index.json
+{ "schemaVersion": 1,
+  "datasets": [
+    { "id": "mcd-level-1", "title": "MuleSoft MCD Level 1", "file": "mcd-level-1/questions.json",
+      "questions": 226, "images": 246 }
+  ] }
+```
 
 ```jsonc
+// <dataset-id>/questions.json
 [
   {
     "id": 1,
-    "text": "Which of the following are good use cases for ElastiCache? (Select TWO)",
+    "text": "Which of the following …? (Select TWO)",
+    "image": "images/q001.jpeg",                  // optional, relative to this file
     "options": [
-      { "text": "Improve latency for read-heavy workloads.", "correct": true },
-      { "text": "Improve performance of S3 PUT operations.", "correct": false }
-      // ...
+      { "text": "Option text", "correct": true },
+      { "text": "", "correct": false, "image": "images/q001_B.jpeg" }
     ],
-    "selectCount": 2   // number of correct answers; drives multi-select UI
+    "selectCount": 2,                              // number of correct options
+    "explanation": "Markdown shown after answering",   // optional
+    "explanationImage": "images/q001_expl.png"         // optional
   }
 ]
+```
+
+`id` must be stable: stats, notes and history are keyed by it, per dataset.
+
+### Re-parse the bundled AWS questions
+
+```bash
+git clone https://github.com/Ditectrev/Amazon-Web-Services-AWS-Developer-Associate-DVA-C02-Practice-Tests-Exams-Questions-Answers \
+  assets/Amazon-Web-Services-AWS-Developer-Associate-DVA-C02-Practice-Tests-Exams-Questions-Answers
+npm run parse        # or: node scripts/parse-questions.mjs path/to/README.md path/to/output.json
 ```
 
 ---
@@ -178,12 +195,18 @@ The `VITE_BASE_PATH` env variable is set automatically by the workflow to `/<rep
 
 ## Local data storage
 
-All data is stored exclusively in your browser's `localStorage` — nothing is sent to any server.
+Only progress and settings are stored in the browser (`localStorage`). `<dataset>` is `aws-dva-c02` for the bundled dataset and `<source-id>:<dataset-id>` otherwise.
 
 | Key | Content |
 |---|---|
-| `quizzer_notes` | `Record<questionId, markdownString>` — your per-question notes |
-| `quizzer_imported_questions` | `Question[]` — custom question set (if imported) |
+| `quizzer_stats:<dataset>` | per-question correct/wrong counters |
+| `quizzer_notes:<dataset>` | `Record<questionId, markdownString>` — your notes |
+| `quizzer_sessions:<dataset>` | session history |
+| `quizzer_practice_draft:<dataset>` | resumable practice session |
+| `quizzer_sources` | configured dataset sources (including tokens for private repos) |
+| `quizzer_active_dataset` | last opened dataset |
+
+Progress saved by earlier versions (unscoped `quizzer_*` keys) is migrated to the bundled dataset automatically.
 
 ---
 

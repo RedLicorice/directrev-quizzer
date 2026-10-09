@@ -1,14 +1,21 @@
 import { useState } from 'react';
-import { Clock, BookOpen, Layers, HardDrive, AlertTriangle, CheckCircle2, Database, History, BarChart2 } from 'lucide-react';
-import type { Mode, SessionConfig, Question } from '../types';
+import { Clock, BookOpen, Layers, HardDrive, AlertTriangle, CheckCircle2, Database, History, BarChart2, GitBranch } from 'lucide-react';
+import type { Mode, SessionConfig, Question, SourceConfig, DatasetEntry } from '../types';
 import BackupRestoreModal from './BackupRestoreModal';
+import DatasetPickerModal from './DatasetPickerModal';
+import { BUNDLED_DATASET_KEY } from '../utils/storage';
 
 interface Props {
   questionCount: number;
   loadError: boolean;
   isImported: boolean;
+  datasetTitle: string;
+  active: { sourceId: string; datasetId: string };
+  datasetLoading: boolean;
+  datasetError: string | null;
+  onOpenDataset: (source: SourceConfig | null, entry: DatasetEntry) => Promise<boolean>;
   onSelectMode: (mode: Mode) => void;
-  onSetQuestions: (questions: Question[], persist: boolean) => void;
+  onSetQuestions: (questions: Question[]) => void;
   onClearImported: () => void;
   onBackup: () => void;
   onRestoreData: (data: { questions?: Question[]; notes?: Record<string, string>; stats?: import('../types').Stats }) => void;
@@ -55,6 +62,11 @@ export default function HomeScreen({
   questionCount,
   loadError,
   isImported,
+  datasetTitle,
+  active,
+  datasetLoading,
+  datasetError,
+  onOpenDataset,
   onSelectMode,
   onClearImported,
   onBackup,
@@ -71,6 +83,7 @@ export default function HomeScreen({
   defaultConfigs,
 }: Props) {
   const [showDataModal, setShowDataModal] = useState(false);
+  const [showDatasets, setShowDatasets] = useState(false);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-8 animate-fade-in">
@@ -81,11 +94,11 @@ export default function HomeScreen({
             <span className="text-slate-900 font-extrabold text-2xl">Q</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight bg-gradient-to-r from-amber-400 to-amber-200 bg-clip-text text-transparent">
-            AWS Quizzer
+            Quizzer
           </h1>
         </div>
         <p className="text-slate-400 text-sm sm:text-base">
-          AWS Developer Associate (DVA-C02) · Practice Tests
+          {datasetTitle} · Practice Tests
         </p>
 
         {/* Questions status */}
@@ -93,15 +106,22 @@ export default function HomeScreen({
           {loadError ? (
             <span className="flex items-center gap-1.5 text-amber-400">
               <AlertTriangle className="w-4 h-4" />
-              Run <code className="bg-slate-800 px-1.5 py-0.5 rounded text-xs font-mono">npm run parse</code> to load questions
+              Could not load questions
             </span>
+          ) : datasetLoading ? (
+            <span className="text-slate-500">Loading dataset…</span>
           ) : questionCount > 0 ? (
             <span className="flex items-center gap-1.5 text-emerald-400">
               <CheckCircle2 className="w-4 h-4" />
               {questionCount} questions loaded
-              {isImported && <span className="text-amber-400 text-xs">(imported)</span>}
+              {isImported && <span className="text-amber-400 text-xs">(file, this session only)</span>}
             </span>
           ) : null}
+          {datasetError && !showDatasets && (
+            <span className="flex items-center gap-1.5 text-amber-400 text-xs max-w-md text-left">
+              <AlertTriangle className="w-4 h-4 shrink-0" /> {datasetError}
+            </span>
+          )}
         </div>
       </div>
 
@@ -132,11 +152,18 @@ export default function HomeScreen({
       {/* Bottom action row */}
       <div className="flex items-center gap-6 flex-wrap justify-center">
         <button
+          onClick={() => setShowDatasets(true)}
+          className="flex items-center gap-2 text-sm text-slate-400 hover:text-amber-400 transition-colors py-2"
+        >
+          <GitBranch className="w-4 h-4" />
+          Datasets
+        </button>
+        <button
           onClick={() => setShowDataModal(true)}
           className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-300 transition-colors py-2"
         >
           {isImported ? <Database className="w-4 h-4 text-amber-500" /> : <HardDrive className="w-4 h-4" />}
-          Backup · Restore · Import
+          Backup · Restore
         </button>
         <button
           onClick={onHistory}
@@ -154,6 +181,17 @@ export default function HomeScreen({
           Dataset
         </button>
       </div>
+
+      {showDatasets && (
+        <DatasetPickerModal
+          bundled={{ id: BUNDLED_DATASET_KEY, title: 'AWS Certified Developer Associate (DVA-C02)', questions: 387 }}
+          active={active}
+          loading={datasetLoading}
+          error={datasetError}
+          onSelect={async (src, entry) => { if (await onOpenDataset(src, entry)) setShowDatasets(false); }}
+          onClose={() => setShowDatasets(false)}
+        />
+      )}
 
       {showDataModal && (
         <BackupRestoreModal
