@@ -60,6 +60,12 @@ variable "dataset_github_environment" {
   default = "prod"
 }
 
+variable "dataset_oidc_subjects" {
+  description = "Per-dataset override of the GitHub Actions OIDC `sub` claim(s) the publisher role trusts. Needed only for a dataset repo that has GitHub's \"immutable subject claims\" enabled (check with `gh api repos/<owner>/<repo>/actions/oidc/customization/sub`): then the sub is `repo:<owner>@<ownerId>/<repo>@<repoId>:environment:<env>` instead of the classic `repo:<owner>/<repo>:environment:<env>`. Default (no entry): the classic format."
+  type        = map(list(string))
+  default     = {}
+}
+
 variable "budget_amount_usd" {
   type    = number
   default = 5

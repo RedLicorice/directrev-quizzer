@@ -23,8 +23,16 @@ variable "app_oidc_subjects" {
 }
 
 variable "datasets" {
-  description = "Dataset id -> repository (owner/name). One publisher role per dataset."
-  type        = map(object({ repo = string }))
+  description = "Dataset id -> repository (owner/name) and optional OIDC subject override. One publisher role per dataset."
+  type = map(object({
+    repo = string
+    # Override for repos with GitHub's "immutable subject claims" enabled, where the
+    # sub is `repo:<owner>@<ownerId>/<repo>@<repoId>:environment:<env>` instead of the
+    # classic `repo:<owner>/<repo>:environment:<env>`. Exact strings only (see
+    # tests/ci.tftest.hcl "No wildcard subjects"): find the real ids with
+    # `gh api repos/<owner>/<repo>/actions/oidc/customization/sub`.
+    oidc_subjects = optional(list(string))
+  }))
 }
 
 variable "dataset_environment" {

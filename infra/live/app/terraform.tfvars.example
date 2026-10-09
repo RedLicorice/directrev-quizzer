@@ -7,3 +7,10 @@ budget_amount_usd     = 5
 # github_owner        = "RedLicorice"
 # dataset_ids         = ["aws-dva-c02", "mule-mcd-01"]
 # create_github_oidc_provider = false   # if the account already has token.actions.githubusercontent.com
+
+# Only if a dataset repo has GitHub's "immutable subject claims" enabled (default for new
+# repos: check with `gh api repos/<owner>/<repo>/actions/oidc/customization/sub`). Otherwise
+# the OIDC trust condition in modules/ci defaults to the classic sub and this is not needed.
+# dataset_oidc_subjects = {
+#   "aws-dva-c02" = ["repo:RedLicorice@<ownerId>/quizzer-dataset-aws-dva-c02@<repoId>:environment:prod"]
+# }

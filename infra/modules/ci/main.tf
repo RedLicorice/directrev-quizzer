@@ -19,7 +19,7 @@ locals {
   trust = {
     for k, subs in merge(
       { app = var.app_oidc_subjects },
-      { for id, d in var.datasets : "ds-${id}" => ["repo:${d.repo}:environment:${var.dataset_environment}"] },
+      { for id, d in var.datasets : "ds-${id}" => coalesce(d.oidc_subjects, ["repo:${d.repo}:environment:${var.dataset_environment}"]) },
       ) : k => {
       Version = "2012-10-17"
       Statement = [{

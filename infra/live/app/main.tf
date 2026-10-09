@@ -1,7 +1,12 @@
 locals {
   name_prefix = "quizzer-${var.environment}"
-  datasets    = { for id in var.dataset_ids : id => { repo = "${var.github_owner}/quizzer-dataset-${id}" } }
-  app_repo    = "${var.github_owner}/${var.app_repo_name}"
+  datasets = {
+    for id in var.dataset_ids : id => {
+      repo          = "${var.github_owner}/quizzer-dataset-${id}"
+      oidc_subjects = lookup(var.dataset_oidc_subjects, id, null)
+    }
+  }
+  app_repo = "${var.github_owner}/${var.app_repo_name}"
 
   edge_function_file   = coalesce(var.edge_function_file, "${path.module}/../../edge/session-check.js")
   auth_lambda_dist_dir = coalesce(var.auth_lambda_dist_dir, "${path.module}/../../lambda/auth/dist")
