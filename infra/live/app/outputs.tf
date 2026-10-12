@@ -40,6 +40,10 @@ output "auth_function_name" {
   value = module.lambdas.function_name
 }
 
+output "admin_function_name" {
+  value = module.lambdas.admin_function_name
+}
+
 output "config_parameter" {
   value = aws_ssm_parameter.config.name
 }

@@ -104,6 +104,7 @@ uri === '/signed-out.html' ||
 return { kind: 'public' };
 }
 if (uri === '/auth' || uri.indexOf('/auth/') === 0) return { kind: 'public' };
+if (uri === '/api/admin' || uri.indexOf('/api/admin/') === 0) return { kind: 'admin' };
 if (uri === '/data' || uri.indexOf('/data/') === 0) {
 const rest = uri.substring(6);
 const slash = rest.indexOf('/');
@@ -120,6 +121,7 @@ if (c.kind === 'public') return 'allow';
 if (!claims) return 'unauthenticated';
 const all = claims.ds.length === 1 && claims.ds[0] === '*';
 if (c.kind === 'session') return 'allow';
+if (c.kind === 'admin') return claims.adm ? 'allow' : 'forbidden';
 if (all) return 'allow';
 if (c.kind === 'dataset' && claims.ds.indexOf(c.id) !== -1) return 'allow';
 return 'forbidden';

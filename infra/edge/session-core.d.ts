@@ -31,5 +31,5 @@ export function safeEqual(a: unknown, b: unknown): boolean;
 export function checkToken(parsed: ParsedToken | null, key: string | null, hmac: Hmac, now: number): SessionClaims | null;
 export function verifySession(token: unknown, getKey: (kid: string) => string | null, hmac: Hmac, now: number): SessionClaims | null;
 export function signSession(claims: object, kid: string, key: string, hmac: Hmac): string;
-export function classifyPath(uri: string): { kind: 'bad' | 'public' | 'session' | 'dataset' | 'admin-only'; id?: string };
+export function classifyPath(uri: string): { kind: 'bad' | 'public' | 'session' | 'dataset' | 'admin-only' | 'admin'; id?: string };
 export function authorize(uri: string, claims: SessionClaims | null): Decision;

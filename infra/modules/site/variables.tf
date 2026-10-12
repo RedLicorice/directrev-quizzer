@@ -28,6 +28,11 @@ variable "auth_function_url" {
   type        = string
 }
 
+variable "admin_function_url" {
+  description = "Function URL of the admin Lambda (https://<id>.lambda-url.<region>.on.aws/)."
+  type        = string
+}
+
 variable "price_class" {
   type    = string
   default = "PriceClass_100"

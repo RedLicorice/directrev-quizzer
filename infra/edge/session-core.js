@@ -161,6 +161,8 @@ export function classifyPath(uri) {
   // /auth/* is served by the auth Lambda and is not associated with this function;
   // if it ever is, let it through (the Lambda does its own checks).
   if (uri === '/auth' || uri.indexOf('/auth/') === 0) return { kind: 'public' };
+  // /api/admin/* is served by the admin Lambda and (M7) only for admins.
+  if (uri === '/api/admin' || uri.indexOf('/api/admin/') === 0) return { kind: 'admin' };
   if (uri === '/data' || uri.indexOf('/data/') === 0) {
     const rest = uri.substring(6);
     const slash = rest.indexOf('/');
@@ -180,6 +182,7 @@ export function authorize(uri, claims) {
   if (!claims) return 'unauthenticated';
   const all = claims.ds.length === 1 && claims.ds[0] === '*';
   if (c.kind === 'session') return 'allow';
+  if (c.kind === 'admin') return claims.adm ? 'allow' : 'forbidden';
   if (all) return 'allow';
   if (c.kind === 'dataset' && claims.ds.indexOf(c.id) !== -1) return 'allow';
   return 'forbidden';

@@ -1,5 +1,6 @@
 # CloudFront distribution on the default *.cloudfront.net domain (phase 1, no alias/ACM).
 # Behaviors (order matters, first match wins):
+#   /api/admin/* -> admin Lambda Function URL (OAC), session-check (adm), no cache
 #   /auth/*  -> auth Lambda Function URL (OAC), no cache, all viewer values except Host, NO function
 #   /data/*  -> data bucket (OAC), session-check, edge TTL, browser `private, no-cache`
 #   default  -> app bucket (OAC), session-check, CachingOptimized
@@ -14,11 +15,13 @@ locals {
     all_viewer_except_host = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
   }
   origin_ids = {
-    app  = "app-s3"
-    data = "data-s3"
-    auth = "auth-lambda"
+    app   = "app-s3"
+    data  = "data-s3"
+    auth  = "auth-lambda"
+    admin = "admin-lambda"
   }
-  auth_origin_domain = trimsuffix(trimprefix(var.auth_function_url, "https://"), "/")
+  auth_origin_domain  = trimsuffix(trimprefix(var.auth_function_url, "https://"), "/")
+  admin_origin_domain = trimsuffix(trimprefix(var.admin_function_url, "https://"), "/")
 }
 
 resource "aws_cloudfront_origin_access_control" "s3" {
@@ -74,6 +77,36 @@ resource "aws_cloudfront_distribution" "this" {
       https_port             = 443
       origin_protocol_policy = "https-only"
       origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  origin {
+    origin_id                = local.origin_ids.admin
+    domain_name              = local.admin_origin_domain
+    origin_access_control_id = aws_cloudfront_origin_access_control.lambda.id
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  # Admin API (M7). Ordered before the others; the session-check function requires adm=true.
+  ordered_cache_behavior {
+    path_pattern               = "/api/admin/*"
+    target_origin_id           = local.origin_ids.admin
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods             = ["GET", "HEAD"]
+    compress                   = true
+    cache_policy_id            = local.managed.caching_disabled
+    origin_request_policy_id   = local.managed.all_viewer_except_host
+    response_headers_policy_id = var.app_response_headers_policy_id
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = var.session_check_function_arn
     }
   }
 

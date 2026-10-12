@@ -87,6 +87,12 @@ variable "auth_lambda_dist_dir" {
   default     = null
 }
 
+variable "admin_lambda_dist_dir" {
+  description = "Directory with the bundled admin Lambda (npm run build:admin in infra/)."
+  type        = string
+  default     = null
+}
+
 variable "edge_function_file" {
   description = "Built CloudFront Function file (npm run build:edge in infra/)."
   type        = string

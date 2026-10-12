@@ -44,3 +44,19 @@ variable "reserved_concurrency" {
   type        = number
   default     = -1
 }
+
+variable "admin_zip_path" {
+  description = "Path of the admin Lambda zip (built from infra/lambda/admin/dist)."
+  type        = string
+}
+
+variable "admin_zip_sha256" {
+  description = "base64 SHA-256 of the admin Lambda zip (archive_file.output_base64sha256)."
+  type        = string
+}
+
+variable "admin_reserved_concurrency" {
+  description = "Reserved concurrency for the admin Lambda (-1 = none)."
+  type        = number
+  default     = -1
+}

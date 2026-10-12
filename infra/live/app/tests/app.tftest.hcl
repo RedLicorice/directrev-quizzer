@@ -77,6 +77,7 @@ variables {
   cognito_domain_prefix = "quizzer-x7k2"
   admin_email           = "owner@example.com"
   auth_lambda_dist_dir  = "tests"
+  admin_lambda_dist_dir = "tests"
 }
 
 run "full_stack" {

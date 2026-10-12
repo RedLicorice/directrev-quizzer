@@ -9,12 +9,15 @@
     "build:edge": "node edge/build-function.mjs",
     "check:edge": "node edge/build-function.mjs --check",
     "build:lambda": "node lambda/auth/build.mjs",
-    "build": "npm run build:edge && npm run build:lambda",
-    "typecheck": "tsc -p lambda/auth/tsconfig.json --noEmit",
+    "build:admin": "node lambda/admin/build.mjs",
+    "build": "npm run build:edge && npm run build:lambda && npm run build:admin",
+    "typecheck": "tsc -p lambda/auth/tsconfig.json --noEmit && tsc -p lambda/admin/tsconfig.json --noEmit",
     "test": "npm run check:edge && npm run typecheck && vitest run"
   },
   "dependencies": {
     "@aws-sdk/client-cloudfront-keyvaluestore": "3.1148.0",
+    "@aws-sdk/client-cloudwatch-logs": "3.1148.0",
+    "@aws-sdk/client-cognito-identity-provider": "3.1148.0",
     "@aws-sdk/client-ssm": "3.1148.0",
     "@aws-sdk/signature-v4a": "3.1138.0"
   },

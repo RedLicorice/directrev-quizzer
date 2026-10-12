@@ -17,3 +17,11 @@ output "role_arn" {
 output "log_group_name" {
   value = aws_cloudwatch_log_group.auth.name
 }
+
+output "admin_function_name" {
+  value = aws_lambda_function.admin.function_name
+}
+
+output "admin_function_url" {
+  value = aws_lambda_function_url.admin.function_url
+}

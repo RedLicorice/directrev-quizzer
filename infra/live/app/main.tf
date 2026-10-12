@@ -8,9 +8,10 @@ locals {
   }
   app_repo = "${var.github_owner}/${var.app_repo_name}"
 
-  edge_function_file   = coalesce(var.edge_function_file, "${path.module}/../../edge/session-check.js")
-  auth_lambda_dist_dir = coalesce(var.auth_lambda_dist_dir, "${path.module}/../../lambda/auth/dist")
-  config_parameter     = "/quizzer/${var.environment}/config"
+  edge_function_file    = coalesce(var.edge_function_file, "${path.module}/../../edge/session-check.js")
+  auth_lambda_dist_dir  = coalesce(var.auth_lambda_dist_dir, "${path.module}/../../lambda/auth/dist")
+  admin_lambda_dist_dir = coalesce(var.admin_lambda_dist_dir, "${path.module}/../../lambda/admin/dist")
+  config_parameter      = "/quizzer/${var.environment}/config"
 }
 
 module "edge" {
@@ -26,6 +27,13 @@ data "archive_file" "auth" {
   output_path = "${path.module}/.build/auth.zip"
 }
 
+# admin Lambda bundle (npm run build:admin).
+data "archive_file" "admin" {
+  type        = "zip"
+  source_dir  = local.admin_lambda_dist_dir
+  output_path = "${path.module}/.build/admin.zip"
+}
+
 module "lambdas" {
   source                = "../../modules/lambdas"
   name_prefix           = local.name_prefix
@@ -33,6 +41,8 @@ module "lambdas" {
   region                = var.region
   auth_zip_path         = data.archive_file.auth.output_path
   auth_zip_sha256       = data.archive_file.auth.output_base64sha256
+  admin_zip_path        = data.archive_file.admin.output_path
+  admin_zip_sha256      = data.archive_file.admin.output_base64sha256
   config_parameter_name = local.config_parameter
   kvs_arn               = module.edge.kvs_arn
   distribution_arn      = module.site.distribution_arn
@@ -48,6 +58,7 @@ module "site" {
   data_response_headers_policy_id = module.edge.data_response_headers_policy_id
   data_cache_policy_id            = module.edge.data_cache_policy_id
   auth_function_url               = module.lambdas.function_url
+  admin_function_url              = module.lambdas.admin_function_url
   log_retention_days              = var.log_retention_days
 }
 

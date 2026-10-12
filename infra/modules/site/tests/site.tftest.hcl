@@ -31,6 +31,7 @@ variables {
   data_response_headers_policy_id = "data-rhp"
   data_cache_policy_id            = "data-cp"
   auth_function_url               = "https://abcdefghijklmnop.lambda-url.eu-central-1.on.aws/"
+  admin_function_url              = "https://adminadminadmin.lambda-url.eu-central-1.on.aws/"
 }
 
 run "buckets_are_private" {
@@ -107,18 +108,22 @@ run "oac" {
     error_message = "Lambda OAC: always sign."
   }
   assert {
-    condition     = length(aws_cloudfront_distribution.this.origin) == 3
-    error_message = "Three origins: app, data, auth."
+    condition     = length(aws_cloudfront_distribution.this.origin) == 4
+    error_message = "Four origins: app, data, auth, admin."
   }
   assert {
     condition = alltrue([for o in aws_cloudfront_distribution.this.origin :
-      o.origin_access_control_id == (o.origin_id == "auth-lambda" ? aws_cloudfront_origin_access_control.lambda.id : aws_cloudfront_origin_access_control.s3.id)
+      o.origin_access_control_id == (o.origin_id == "auth-lambda" || o.origin_id == "admin-lambda" ? aws_cloudfront_origin_access_control.lambda.id : aws_cloudfront_origin_access_control.s3.id)
     ])
     error_message = "Every origin uses the matching OAC."
   }
   assert {
     condition     = one([for o in aws_cloudfront_distribution.this.origin : o.domain_name if o.origin_id == "auth-lambda"]) == "abcdefghijklmnop.lambda-url.eu-central-1.on.aws"
     error_message = "Auth origin = Function URL host."
+  }
+  assert {
+    condition     = one([for o in aws_cloudfront_distribution.this.origin : o.domain_name if o.origin_id == "admin-lambda"]) == "adminadminadmin.lambda-url.eu-central-1.on.aws"
+    error_message = "Admin origin = Function URL host."
   }
   assert {
     condition     = alltrue([for o in aws_cloudfront_distribution.this.origin : length(o.s3_origin_config) == 0])
@@ -130,32 +135,48 @@ run "behaviors" {
   command = apply
 
   assert {
-    condition     = [for b in aws_cloudfront_distribution.this.ordered_cache_behavior : b.path_pattern] == ["/auth/*", "/data/*"]
-    error_message = "Behavior order: /auth/* then /data/* (default last)."
+    condition     = [for b in aws_cloudfront_distribution.this.ordered_cache_behavior : b.path_pattern] == ["/api/admin/*", "/auth/*", "/data/*"]
+    error_message = "Behavior order: /api/admin/*, /auth/*, /data/* (default last)."
   }
   assert {
-    condition     = aws_cloudfront_distribution.this.ordered_cache_behavior[0].target_origin_id == "auth-lambda" && length(aws_cloudfront_distribution.this.ordered_cache_behavior[0].function_association) == 0
+    condition = (
+      aws_cloudfront_distribution.this.ordered_cache_behavior[0].target_origin_id == "admin-lambda" &&
+      aws_cloudfront_distribution.this.ordered_cache_behavior[0].cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" &&
+      aws_cloudfront_distribution.this.ordered_cache_behavior[0].origin_request_policy_id == "b689b0a8-53d0-40ab-baf2-68738e2966ac" &&
+      aws_cloudfront_distribution.this.ordered_cache_behavior[0].response_headers_policy_id == "app-rhp" &&
+      contains(aws_cloudfront_distribution.this.ordered_cache_behavior[0].allowed_methods, "DELETE")
+    )
+    error_message = "/api/admin/*: admin Lambda, CachingDisabled + AllViewerExceptHostHeader, mutations allowed."
+  }
+  assert {
+    condition = [for f in aws_cloudfront_distribution.this.ordered_cache_behavior[0].function_association : [f.event_type, f.function_arn]] == [
+      ["viewer-request", "arn:aws:cloudfront::123456789012:function/quizzer-test-session-check"]
+    ]
+    error_message = "/api/admin/* is protected by session-check (viewer-request, adm=true)."
+  }
+  assert {
+    condition     = aws_cloudfront_distribution.this.ordered_cache_behavior[1].target_origin_id == "auth-lambda" && length(aws_cloudfront_distribution.this.ordered_cache_behavior[1].function_association) == 0
     error_message = "/auth/* goes to the Lambda and has NO session-check."
   }
   assert {
-    condition     = aws_cloudfront_distribution.this.ordered_cache_behavior[0].cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" && aws_cloudfront_distribution.this.ordered_cache_behavior[0].origin_request_policy_id == "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    condition     = aws_cloudfront_distribution.this.ordered_cache_behavior[1].cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" && aws_cloudfront_distribution.this.ordered_cache_behavior[1].origin_request_policy_id == "b689b0a8-53d0-40ab-baf2-68738e2966ac"
     error_message = "/auth/*: CachingDisabled + AllViewerExceptHostHeader."
   }
   assert {
-    condition     = contains(aws_cloudfront_distribution.this.ordered_cache_behavior[0].allowed_methods, "POST")
+    condition     = contains(aws_cloudfront_distribution.this.ordered_cache_behavior[1].allowed_methods, "POST")
     error_message = "/auth/refresh needs POST."
   }
   assert {
     condition = (
-      aws_cloudfront_distribution.this.ordered_cache_behavior[1].target_origin_id == "data-s3" &&
-      aws_cloudfront_distribution.this.ordered_cache_behavior[1].cache_policy_id == "data-cp" &&
-      aws_cloudfront_distribution.this.ordered_cache_behavior[1].response_headers_policy_id == "data-rhp" &&
-      toset(aws_cloudfront_distribution.this.ordered_cache_behavior[1].allowed_methods) == toset(["GET", "HEAD"])
+      aws_cloudfront_distribution.this.ordered_cache_behavior[2].target_origin_id == "data-s3" &&
+      aws_cloudfront_distribution.this.ordered_cache_behavior[2].cache_policy_id == "data-cp" &&
+      aws_cloudfront_distribution.this.ordered_cache_behavior[2].response_headers_policy_id == "data-rhp" &&
+      toset(aws_cloudfront_distribution.this.ordered_cache_behavior[2].allowed_methods) == toset(["GET", "HEAD"])
     )
     error_message = "/data/*: data bucket, data cache policy, data headers, read-only."
   }
   assert {
-    condition = [for f in aws_cloudfront_distribution.this.ordered_cache_behavior[1].function_association : [f.event_type, f.function_arn]] == [
+    condition = [for f in aws_cloudfront_distribution.this.ordered_cache_behavior[2].function_association : [f.event_type, f.function_arn]] == [
       ["viewer-request", "arn:aws:cloudfront::123456789012:function/quizzer-test-session-check"]
     ]
     error_message = "/data/* is protected by session-check (viewer-request)."
