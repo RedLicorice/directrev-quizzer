@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { LogOut, User, WifiOff, ShieldCheck } from 'lucide-react';
+import { LogOut, User, WifiOff, ShieldCheck, Users } from 'lucide-react';
 import { logout } from './session';
 import { useLiveSession, useOnline } from './useSession';
 
-/** Home header (AWS build): signed-in user, offline badge and "Esci". */
-export default function UserChip() {
+/** Home header (AWS build): signed-in user, offline badge, "Admin" (admins only) and "Esci". */
+export default function UserChip({ onAdmin }: { onAdmin?: () => void }) {
   const session = useLiveSession();
   const online = useOnline();
   const [leaving, setLeaving] = useState(false);
@@ -20,6 +20,11 @@ export default function UserChip() {
         {session.adm ? <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-amber-400" /> : <User className="w-3.5 h-3.5 shrink-0 text-slate-500" />}
         <span className="truncate" data-testid="user-email">{session.email}</span>
       </span>
+      {session.adm && onAdmin && (
+        <button onClick={onAdmin} className="btn-ghost inline-flex shrink-0 items-center gap-1.5 px-3 py-1 text-sm" data-testid="admin-link">
+          <Users className="w-4 h-4" /> Admin
+        </button>
+      )}
       <button
         onClick={() => { setLeaving(true); void logout(); }}
         disabled={leaving}

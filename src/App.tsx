@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
+import type { ComponentType, LazyExoticComponent } from 'react';
 import type { Mode, SessionConfig, SessionResult, SessionRecord, Question, Stats, PracticeSessionDraft, SourceConfig, DatasetEntry } from './types';
 import { DEFAULT_CONFIGS } from './types';
 import { shuffle } from './utils/shuffle';
@@ -25,7 +26,17 @@ type Screen =
   | { name: 'results'; result: SessionResult }
   | { name: 'history' }
   | { name: 'review'; record: SessionRecord }
+  | { name: 'admin' }
   | { name: 'dataset' };
+
+// AWS build only: the dynamic import lives inside a plain `if` so Vite drops it from the
+// Pages build entirely (same pattern as AuthGate in main.tsx), keeping /auth and /api/admin
+// out of the public bundle.
+type AdminScreenProps = { onBack: () => void };
+let AdminScreen: LazyExoticComponent<ComponentType<AdminScreenProps>> | null = null;
+if (import.meta.env.VITE_DEPLOY === 'aws') {
+  AdminScreen = lazy(() => import('./aws/admin/AdminScreen'));
+}
 
 const MAX_SESSIONS = 100;
 const BUNDLED_TITLE = 'AWS Certified Developer Associate (DVA-C02)';
@@ -359,6 +370,7 @@ export default function App() {
   const handleHome = useCallback(() => setScreen({ name: 'home' }), []);
   const handleHistory = useCallback(() => setScreen({ name: 'history' }), []);
   const handleDataset = useCallback(() => setScreen({ name: 'dataset' }), []);
+  const handleAdmin = useCallback(() => setScreen({ name: 'admin' }), []);
   const handleRetry = useCallback((result: SessionResult) => {
     setScreen({ name: 'config', mode: result.mode });
   }, []);
@@ -382,6 +394,7 @@ export default function App() {
         onResetStats={handleResetStats}
         onHistory={handleHistory}
         onDataset={handleDataset}
+        onAdmin={handleAdmin}
         onExportNotes={handleExportNotes}
         onImportNotes={handleImportNotes}
         onExportStats={handleExportStats}
@@ -467,6 +480,15 @@ export default function App() {
 
   if (screen.name === 'results') {
     return <ResultsScreen result={screen.result} onHome={handleHome} onRetry={handleRetry} />;
+  }
+
+  if (screen.name === 'admin') {
+    if (!AdminScreen) return null; // never reachable in the Pages build
+    return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-slate-400">Caricamento…</div>}>
+        <AdminScreen onBack={handleHome} />
+      </Suspense>
+    );
   }
 
   return null;
