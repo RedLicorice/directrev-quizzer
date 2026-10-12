@@ -1,0 +1,65 @@
+name: Deploy to AWS
+
+# Publishes the `--mode aws` build (CloudFront + /auth + /data) to the app bucket.
+# Authentication is GitHub OIDC; the role only allows writing the app bucket and
+# invalidating the distribution (infra/modules/ci). The `prod` environment supplies
+# AWS_ROLE_ARN, AWS_REGION, APP_BUCKET and CLOUDFRONT_DISTRIBUTION_ID as variables.
+#
+# Manual deploy equivalent (infra/README.md §8):
+#   npm ci && npm run build -- --mode aws
+#   aws s3 sync dist/assets "s3://$APP_BUCKET/assets" --cache-control "public,max-age=31536000,immutable"
+#   aws s3 sync dist "s3://$APP_BUCKET" --exclude "assets/*" --cache-control "no-cache"
+#   aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-aws
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC -> sts:AssumeRoleWithWebIdentity
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod # the role trust requires exactly environment:prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build (AWS flavour)
+        run: npm run build -- --mode aws
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Hashed assets are immutable: never deleted, old chunks stay for open clients.
+      - name: Sync assets (immutable)
+        run: aws s3 sync dist/assets "s3://${{ vars.APP_BUCKET }}/assets" --cache-control "public,max-age=31536000,immutable"
+
+      # App shell and service worker: short-lived, always revalidated.
+      - name: Sync app shell (no-cache)
+        run: aws s3 sync dist "s3://${{ vars.APP_BUCKET }}" --exclude "assets/*" --cache-control "no-cache"
+
+      - name: Invalidate CloudFront
+        run: aws cloudfront create-invalidation --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" --paths "/*"
