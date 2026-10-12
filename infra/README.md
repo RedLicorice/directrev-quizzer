@@ -60,8 +60,8 @@ aws sts get-caller-identity             # annota l'Account (12 cifre)
 ```bash
 cd infra
 npm ci
-npm test              # edge (vettori, casi malevoli, harness del runtime), Lambda, script: tutto offline
-npm run build         # = build:edge (edge/session-check.js) + build:lambda (lambda/auth/dist/index.mjs)
+npm test              # edge (vettori, casi malevoli, harness del runtime), Lambda auth+admin, script: tutto offline
+npm run build         # = build:edge + build:lambda + build:admin
 ```
 
 - `edge/session-check.js` è **generato** da `edge/session-core.js` + `edge/session-check.template.js` ed è committato.
@@ -70,6 +70,8 @@ npm run build         # = build:edge (edge/session-check.js) + build:lambda (lam
 - `lambda/auth/dist/index.mjs` è il bundle esbuild (SDK v3 inclusi, niente Docker). Terraform lo zippa da solo
   (`archive_file` in `live/app/main.tf` -> `live/app/.build/auth.zip`). **Rifai `npm run build:lambda` prima di ogni
   `plan`** se hai toccato la Lambda.
+- `lambda/admin/dist/index.mjs` è il bundle della Lambda `admin` (gestione utenti, M7). Terraform lo zippa in
+  `live/app/.build/admin.zip`: **`npm run build:admin` prima di ogni `plan`** se hai toccato quella Lambda.
 
 ## 4. Bootstrap del bucket di stato (una volta sola)
 
@@ -206,6 +208,28 @@ scripts/invite-user.sh --resend collega@example.com              # nuova e-mail 
   vede "Accesso non abilitato" e non riceve la sessione.
 - `ds-mule-mcd-01` contiene materiale d'esame di terze parti: lo script chiede `--confirm-mcd` (piano v2 §6).
 - MFA: opzionale, TOTP (app di autenticazione). Ognuno può attivarla dalla pagina di login gestita da Cognito.
+
+### Pannello admin (M7)
+
+La gestione utenti è disponibile **nell'app** (`--mode aws`), nella schermata "Amministrazione": compare il pulsante
+**Admin** per chi ha il gruppo `admin`. Da lì: elenco utenti (ricerca per e-mail/gruppo), invito con scelta dei gruppi,
+dettaglio utente (gruppi, abilita/disabilita, reinvito, sign-out globale, reset password, elimina), e un tab **Audit**
+con le ultime azioni. La logica sta nella Lambda `admin` dietro `/api/admin/*`; il contratto è in
+[`CONTRACT.md`](CONTRACT.md) §5.1.
+
+- **Deploy**: la Lambda `admin` fa parte di `live/app` (modulo `lambdas`, behavior `/api/admin/*`). Serve
+  `npm run build:admin` prima del `plan`; `scripts/check-plan.sh` resta obbligatorio (il behavior è una modifica in-place
+  della distribuzione, non una sostituzione).
+- **Autorizzazione a tre livelli**: la funzione edge pretende `adm=true`; la Lambda riverifica l'HMAC del cookie e
+  richiama Cognito (`AdminListGroupsForUser`, cache 60 s) per il gruppo `admin` in tempo reale. Un admin rimosso perde
+  l'accesso subito, anche col cookie ancora valido.
+- **IAM**: la politica Cognito della Lambda usa `userpool/*` (stesso account/regione) per **evitare un ciclo Terraform**
+  (user pool -> callback della distribuzione -> behavior `/api/admin/*` -> Lambda); il pool id arriva dall'SSM a runtime.
+- **Audit**: ogni mutazione è un record JSON su CloudWatch Logs (`admin_action`), riscritto in lettura da
+  `GET /api/admin/audit` (nessun DynamoDB, retention 90 giorni).
+- **Rate limit**: best-effort in memoria (30 mutazioni/ora, 20 inviti/giorno per attore): niente datastore, i limiti veri
+  restano il gruppo `admin` e la concorrenza riservata.
+- Gli script `invite-user.sh` / `offboard-user.sh` restano per il **bootstrap** (primo admin, emergenze da CLI).
 
 ## 10. Primo publish dei dati
 

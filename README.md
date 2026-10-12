@@ -225,7 +225,7 @@ One codebase, two builds:
 | Backend | none | CloudFront + Lambda `auth` (Cognito) + S3, see `infra/` on branch `feat/aws-infra` |
 | Datasets | bundled DVA-C02 + GitHub / Static URL sources | built-in **hosted** source (same origin, `/data/<id>/`), GitHub / URL sources under *Avanzate*; the bundled dataset is not shipped |
 | Progress keys | unchanged | per user (`u:<sub>:…`) |
-| Auth code | tree-shaken away (checked by `tests/builds.test.ts`) | `src/aws/` (`AuthGate`, session client, user chip + *Esci*) |
+| Auth code | tree-shaken away (checked by `tests/builds.test.ts`) | `src/aws/` (`AuthGate`, session client, user chip + *Esci*, `admin/` panel for admins) |
 
 How the hosted build works:
 
@@ -238,13 +238,16 @@ How the hosted build works:
   authenticates them. 401 → one refresh + retry → login; 403 → "dataset non abilitato".
 - The session is refreshed 5 minutes before it expires and when the tab becomes visible. *Esci* clears runtime caches,
   `sessionStorage` and in-memory images, then goes to `/auth/logout`.
+- Admins (group `admin`) get an **Admin** button on the home screen: the `admin/` panel manages users (invite, groups,
+  enable/disable, global sign-out, password reset, delete) against `/api/admin/*` and shows the CloudWatch audit log
+  (`infra/CONTRACT.md` §5.1).
 - The service worker never answers `/auth/*`, `/data/*`, `/api/*` with the cached `index.html` and never caches them
   (`navigateFallbackDenylist` + `NetworkOnly`).
 - Fonts are self-hosted (`@fontsource/inter`, `@fontsource/jetbrains-mono`): no external host, CSP-ready.
 - Limits of a shared PC: progress is separated per user *in the app*, but `localStorage` itself is readable by anyone
   using the same browser profile, and GitHub tokens of *Avanzate* sources are stored there in clear.
 
-The backend (Terraform, CloudFront Function, Lambda `auth`) lives in `infra/` on branch `feat/aws-infra`; its
+The backend (Terraform, CloudFront Function, Lambda `auth` + `admin`) lives in `infra/` on branch `feat/aws-infra`; its
 authoritative contract is `infra/CONTRACT.md`, mirrored for the app in [`server/mock/CONTRACT.md`](server/mock/CONTRACT.md).
 
 ### Local mock of the backend

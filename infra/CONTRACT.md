@@ -15,6 +15,7 @@ and this file gets fixed.
 | Path | Served by | Edge check (`session-check`) |
 |---|---|---|
 | `/auth/*` | `auth` Lambda (Function URL, OAC) | none (the Lambda verifies the cookie itself where needed) |
+| `/api/admin/*` | `admin` Lambda (Function URL, OAC) | valid session **and** `adm = true` |
 | `/data/<datasetId>/**` | data bucket (`s3://<data>/data/<id>/...`) | valid session **and** `<id>` in `ds` (or `ds = ["*"]`) |
 | `/manifest.webmanifest`, `/favicon.svg`, `/icon-<name>.svg`, `/signed-out.html` | app bucket | **public** |
 | everything else (app shell, `/assets/*`, `/sw.js`, ...) | app bucket | valid session |
@@ -124,6 +125,9 @@ Path vectors (`anon` = no cookie, `user-aws` = the first vector above, `owner-al
 | `/data/aws-dva-c02-evil/questions.json`, `/data/index.json`, `/data/aws-dva-c02` (no trailing part) | 401/302 | 403 | allow |
 | `/data/aws-dva-c02/../mule-mcd-01/questions.json`, `.../%2e%2e/...`, `/data//mule-mcd-01/...`, `%2f`, `%5c`, `%00` | 400 | 400 | 400 |
 
+`/api/admin/*` is the exception to "the edge only checks a valid session": it requires `adm = true` (otherwise **403** for a signed-in
+non-admin, 401/302 with no session). The admin Lambda re-verifies the HMAC and the live `admin` group (§5.1).
+
 Full list: `vectors.json` -> `paths`.
 
 ## 5. `/auth/*` endpoints (auth Lambda)
@@ -155,8 +159,40 @@ body>`; for the empty body that is `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b
   configured `appHosts` list wins, otherwise `appHosts[0]`. Behind CloudFront with OAC the Lambda receives the Function
   URL host (AllViewerExceptHostHeader policy), so in practice `appHosts[0]` (the distribution domain) is used.
 
-## 6. Runtime config (SSM parameter `/quizzer/prod/config`, String, JSON)
+## 5.1 `/api/admin/*` endpoints (admin Lambda, M7)
 
+User management only (no statistics: plan v3). Same `Cache-Control: no-store` and JSON conventions as §5;
+`POST`/`PUT` need `x-amz-content-sha256` (OAC).
+
+Authorization has three layers: the edge requires `adm = true`; the Lambda re-verifies the cookie HMAC; then it calls
+`AdminListGroupsForUser(actor)` and requires the `admin` group (cache 60 s), so removing an admin is effective
+immediately. Mutations additionally require a same-origin `Origin`/`Sec-Fetch-Site` **and** the header `x-qz-csrf: 1`.
+
+The path identifies a user by `base64url(username)`: the Cognito username is the e-mail in this pool.
+
+| Method + path | Body | Success | Errors |
+|---|---|---|---|
+| `GET /api/admin/overview` | | 200 `{datasets, users:{total,confirmed,pending,disabled}}` | 401/403 |
+| `GET /api/admin/users?filter=` | | 200 `{users:[{key,email,sub?,status,enabled,groups}]}` | 401/403 |
+| `POST /api/admin/users` | `{email, groups[], confirmMcd?}` | 201 invited + groups; Cognito e-mails a temporary password | 400 `bad_email`/`bad_group`/`mcd_confirmation_required`; 409 `exists`; 429 `rate_limited` |
+| `POST /api/admin/users/<k>/resend` | | 200 | 401/403/429 |
+| `PUT /api/admin/users/<k>/groups` | `{groups[], confirmMcd?}` | 200 `{groups}` | 400 `bad_group`/`mcd_confirmation_required`/`self_lockout`; 429 |
+| `POST /api/admin/users/<k>/{disable,enable,signout,reset}` | | 200 | 400 `self_lockout` (disable self); 429 |
+| `DELETE /api/admin/users/<k>` | | 200 | 400 `self_lockout` (delete self); 429 |
+| `GET /api/admin/audit?days=30` | | 200 `{days, entries:[{at,actor,action,target?,groups?,detail?}]}` | 401/403 |
+| anything else | | | 404 `not_found`; 405 |
+
+- Groups must match `^(admin\|ds-all\|ds-[a-z0-9][a-z0-9-]{0,62})$`. Granting `ds-mule-mcd-01` requires `confirmMcd: true`
+  on that request (third-party material). A mutation never removes `admin` from the actor, disables or deletes the actor
+  (`self_lockout`).
+- Every mutation is written to CloudWatch Logs as
+  `{"evt":"admin_action","at","actor","action","target?","groups?","detail?","ip?"}` **before** the response;
+  `GET /api/admin/audit` reads them back with `FilterLogEvents` from the function's own log group (no DynamoDB:
+  plan v3). Retention 90 days.
+- Rate limit (best-effort, per warm container, no datastore): 30 mutations/hour and 20 invites/day per actor.
+  The real ceilings are the `admin` group check and the Lambda reserved concurrency.
+
+## 6. Runtime config (SSM parameter `/quizzer/prod/config`, String, JSON)
 ```json
 {
   "userPoolId": "us-east-1_XXXXXXXXX",
@@ -175,9 +211,10 @@ The Lambda reads it at cold start (cache 5 min). Environment variables of the La
 
 ## 7. Cognito groups
 
-`ds-<datasetId>` (one per dataset), `ds-all`, `admin`. Created by Terraform; membership managed with
-`infra/scripts/invite-user.sh` / `offboard-user.sh` (later by the admin UI, M7). Group changes take effect at the
-next refresh (<= 30 min).
+`ds-<datasetId>` (one per dataset), `ds-all`, `admin`. Created by Terraform; membership managed from the in-app
+admin panel (`/api/admin/*`, §5.1) or the bootstrap scripts `infra/scripts/invite-user.sh` / `offboard-user.sh`.
+For `/data` a group change takes effect at the next refresh (<= 30 min); for `/api/admin/*` it is effective
+immediately (the Lambda re-checks the `admin` group).
 
 ## 8. Response headers (CloudFront response headers policies)
 

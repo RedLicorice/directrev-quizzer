@@ -36,8 +36,8 @@ Primo `apply`; header `Cache-Control` custom nella response headers policy; logg
 
 ## Aperto / da decidere
 - **CSP**: Terraform usa quella larga (`https:` in connect/img-src, variabile `content_security_policy`); per i colleghi consigliata quella stretta (solo `api.github.com`, `raw.githubusercontent.com`). `signed-out.html` ha uno stile inline: serve l'hash `sha256-K8NHBPQeBO4G4qXU8S9dAHowhoCAOLgngwcqJNDqBfs=` se la CSP vieta `unsafe-inline`.
-- **Workflow `deploy-aws.yml`** per pubblicare la build `--mode aws` sul bucket dell'app: ancora da scrivere (variabili già previste dagli output Terraform).
-- **Console admin** (inviti e gestione utenti nell'app): non ancora fatta (M7 del piano), per ora `infra/scripts/invite-user.sh`.
+- **Workflow `deploy-aws.yml`** per pubblicare la build `--mode aws` sul bucket dell'app: **fatto** (OIDC, environment `prod`).
+- **Console admin** (inviti e gestione utenti nell'app): **fatta** per la gestione utenti (M7): Lambda `admin` + `/api/admin/*` + schermata "Amministrazione"; gli script `infra/scripts/*.sh` restano per il bootstrap. Statistiche/scoreboard restano fuori scope (v3).
 - **Difetti nei dati MuleSoft**: Q175 opzioni A e D identiche; Q187 opzioni C e D identiche e RAML con artefatti ("12.201:"); Q22/Q25 "What Database expression" forse per "DataWeave"; l'ultima analisi sul testo dei dump ha spazi persi in diverse spiegazioni.
 - Node 20 nei workflow dei repo dati è a fine supporto (basta `node-version: '22'`); `Cache-Control: public` sui dati protetti: valutare `private`; environment `prod` su GitHub: limitare i deploy a `main` ed eventuale approvazione.
 - Differenze minori mock ↔ AWS (404 vs 403 su file mancante, ecc.): `server/mock/CONTRACT.md` §6.
