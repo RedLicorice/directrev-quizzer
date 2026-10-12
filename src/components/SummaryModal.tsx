@@ -58,7 +58,7 @@ export default function SummaryModal({ questions, currentIdx, getStatus, getStat
                 <button
                   key={i}
                   onClick={() => { onNavigate(i); onClose(); }}
-                  title={`Q${i + 1}: ${status}${hasLifetimeData ? ` · ${stat!.correct}✓ ${stat!.wrong}✗ lifetime` : ''}`}
+                  title={`Q${i + 1} · ID #${q.id}: ${status}${hasLifetimeData ? ` · ${stat!.correct}✓ ${stat!.wrong}✗ lifetime` : ''}`}
                   className={`flex flex-col items-center justify-center rounded-xl border px-1 py-1.5 transition-all
                     ${STATUS_STYLES[status]}
                     ${isCurrent ? 'ring-2 ring-amber-400 ring-offset-1 ring-offset-slate-800' : 'hover:opacity-80'}`}

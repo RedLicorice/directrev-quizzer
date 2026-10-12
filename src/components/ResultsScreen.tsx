@@ -4,6 +4,7 @@ import type { SessionResult } from '../types';
 import { calculateScore, isAnswerCorrect } from '../utils/scoring';
 import { formatSeconds } from '../hooks/useTimer';
 import { OptionText } from './MarkdownText';
+import QuestionIdBadge from './QuestionIdBadge';
 
 interface Props {
   result: SessionResult;
@@ -96,6 +97,7 @@ export default function ResultsScreen({ result, onHome, onRetry }: Props) {
                       <XCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
                     )}
                     <span className="flex-1 min-w-0 text-sm text-slate-300 leading-snug line-clamp-2 [overflow-wrap:anywhere]">{q.text}</span>
+                    <QuestionIdBadge id={q.id} className="mt-0.5" />
                     {expanded ? <ChevronUp className="w-4 h-4 text-slate-500 shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" />}
                   </button>
 

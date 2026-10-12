@@ -10,6 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import { QuestionMarkdown, OptionText } from './MarkdownText';
 import DatasetImage from './DatasetImage';
 import ExplanationBlock from './ExplanationBlock';
+import QuestionIdBadge from './QuestionIdBadge';
 
 interface Props {
   questions: Question[];
@@ -213,16 +214,21 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
           )}
 
           <div className="card p-6 sm:p-8">
-            {q.selectCount > 1 && (
-              <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">
-                Select {q.selectCount} answers
-                {!isRevealed && selected.length > 0 && (
-                  <span className="ml-2 text-slate-500 normal-case font-normal">
-                    ({selected.length}/{q.selectCount} selected)
-                  </span>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                {q.selectCount > 1 && (
+                  <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
+                    Select {q.selectCount} answers
+                    {!isRevealed && selected.length > 0 && (
+                      <span className="ml-2 text-slate-500 normal-case font-normal">
+                        ({selected.length}/{q.selectCount} selected)
+                      </span>
+                    )}
+                  </p>
                 )}
-              </p>
-            )}
+              </div>
+              <QuestionIdBadge id={q.id} />
+            </div>
             <p className="text-slate-100 text-base sm:text-lg leading-relaxed">
               <QuestionMarkdown text={q.text} />
             </p>
@@ -234,8 +240,8 @@ export default function PracticeSession({ questions, config, initialDraft, onFin
               <button
                 key={i}
                 onClick={() => toggleOption(i)}
-                disabled={isRevealed}
-                className={`w-full text-left px-5 py-4 rounded-xl border transition-all duration-150 ${getOptionClass(i)}`}
+                aria-disabled={isRevealed}
+                className={`w-full text-left px-5 py-4 rounded-xl border transition-all duration-150 ${isRevealed ? 'cursor-default' : ''} ${getOptionClass(i)}`}
               >
                 <div className="flex items-start gap-3">
                   <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold shrink-0 mt-0.5

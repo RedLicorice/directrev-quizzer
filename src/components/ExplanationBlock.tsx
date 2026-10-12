@@ -12,7 +12,18 @@ export default function ExplanationBlock({ q }: { q: Question }) {
         <Lightbulb className="w-4 h-4" /> Explanation
       </div>
       <div className="px-4 py-3 prose prose-invert prose-sm max-w-none text-slate-300">
-        {q.explanation && <ReactMarkdown>{q.explanation}</ReactMarkdown>}
+        {q.explanation && (
+          <ReactMarkdown
+            components={{
+              img: ({ src, alt }) =>
+                typeof src === 'string' ? (
+                  <DatasetImage src={src} alt={alt ?? ''} className="my-2 max-w-full rounded border border-slate-700/50" />
+                ) : null,
+            }}
+          >
+            {q.explanation}
+          </ReactMarkdown>
+        )}
         {q.explanationImage && (
           <DatasetImage src={q.explanationImage} alt="Explanation figure"
             className="max-w-full rounded border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />

@@ -6,6 +6,7 @@ import SummaryModal from './SummaryModal';
 import type { QuestionStatus } from './SummaryModal';
 import { QuestionMarkdown, OptionText } from './MarkdownText';
 import DatasetImage from './DatasetImage';
+import QuestionIdBadge from './QuestionIdBadge';
 
 interface Props {
   questions: Question[];
@@ -97,14 +98,19 @@ export default function ExamSession({ questions, config, onFinish, onExit }: Pro
       <div className="flex-1 flex flex-col items-center px-4 py-6 sm:py-10">
         <div className="w-full max-w-3xl space-y-5 animate-slide-up" key={currentIdx}>
           <div className="card p-6 sm:p-8">
-            {q.selectCount > 1 && (
-              <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">
-                Select {q.selectCount} answers
-                {selected.length > 0 && (
-                  <span className="ml-2 text-slate-500 normal-case font-normal">({selected.length}/{q.selectCount})</span>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                {q.selectCount > 1 && (
+                  <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
+                    Select {q.selectCount} answers
+                    {selected.length > 0 && (
+                      <span className="ml-2 text-slate-500 normal-case font-normal">({selected.length}/{q.selectCount})</span>
+                    )}
+                  </p>
                 )}
-              </p>
-            )}
+              </div>
+              <QuestionIdBadge id={q.id} />
+            </div>
             <p className="text-slate-100 text-base sm:text-lg leading-relaxed">
               <QuestionMarkdown text={q.text} />
             </p>

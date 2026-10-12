@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { isPrivateImage, fetchPrivateImage } from '../utils/datasets';
 import { refreshSession } from '../aws/auth/session';
+import ImageLightbox from './ImageLightbox';
 
 type Props = Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'> & { src: string };
 
 /** <img> that also handles images stored in private repos (fetched with the source token). */
-export default function DatasetImage({ src, alt, ...rest }: Props) {
+export default function DatasetImage({ src, alt, className, title, onClick, ...rest }: Props) {
   const priv = isPrivateImage(src);
   const [resolved, setResolved] = useState<string | null>(priv ? null : src);
   const [failed, setFailed] = useState(false);
   const [retried, setRetried] = useState(false);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     setRetried(false);
@@ -36,5 +38,24 @@ export default function DatasetImage({ src, alt, ...rest }: Props) {
 
   if (failed) return <span className="text-xs text-rose-400">Image could not be loaded</span>;
   if (!resolved) return <span className="inline-block h-16 w-24 animate-pulse rounded bg-slate-800" aria-label="Loading image" />;
-  return <img src={resolved} alt={alt} loading="lazy" onError={onError} {...rest} />;
+  return (
+    <>
+      <img
+        src={resolved}
+        alt={alt}
+        loading="lazy"
+        onError={onError}
+        title={title ?? 'Click to enlarge'}
+        onClick={(e) => {
+          // Don't let the click reach a wrapping option button (which would toggle the answer).
+          e.stopPropagation();
+          onClick?.(e);
+          setOpen(true);
+        }}
+        className={`cursor-zoom-in ${className ?? ''}`}
+        {...rest}
+      />
+      {open && <ImageLightbox src={resolved} alt={alt} onClose={() => setOpen(false)} />}
+    </>
+  );
 }

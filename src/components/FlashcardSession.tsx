@@ -7,6 +7,7 @@ import { QuestionMarkdown, OptionText } from './MarkdownText';
 import DatasetImage from './DatasetImage';
 import { notesKey } from '../utils/storage';
 import ExplanationBlock from './ExplanationBlock';
+import QuestionIdBadge from './QuestionIdBadge';
 
 interface Props {
   questions: Question[];
@@ -103,7 +104,10 @@ export default function FlashcardSession({ questions, onExit }: Props) {
             {/* Front */}
             <div className="flip-face card flex flex-col items-center justify-center p-6 sm:p-12">
               <div ref={frontRef} className="w-full flex flex-col items-center">
-                <span className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-6">Question</span>
+                <div className="mb-6 flex items-center gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">Question</span>
+                  <QuestionIdBadge id={q.id} />
+                </div>
                 {q.selectCount > 1 && (
                   <span className="text-xs font-semibold text-amber-400 mb-3">
                     Select {q.selectCount} answers

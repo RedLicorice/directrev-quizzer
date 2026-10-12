@@ -11,6 +11,7 @@ import { notesKey } from '../utils/storage';
 import DatasetImage from './DatasetImage';
 import { QuestionMarkdown, OptionText } from './MarkdownText';
 import ExplanationBlock from './ExplanationBlock';
+import QuestionIdBadge from './QuestionIdBadge';
 
 interface Props {
   record: SessionRecord;
@@ -98,9 +99,14 @@ export default function SessionReviewScreen({ record, onBack }: Props) {
           )}
 
           <div className="card p-6 sm:p-8">
-            {q.selectCount > 1 && (
-              <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-3">Select {q.selectCount} answers</p>
-            )}
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                {q.selectCount > 1 && (
+                  <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider">Select {q.selectCount} answers</p>
+                )}
+              </div>
+              <QuestionIdBadge id={q.id} />
+            </div>
             <p className="text-slate-100 text-base sm:text-lg leading-relaxed">
               <QuestionMarkdown text={q.text} />
             </p>

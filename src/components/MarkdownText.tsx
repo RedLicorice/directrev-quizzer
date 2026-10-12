@@ -1,4 +1,5 @@
 import ReactMarkdown from 'react-markdown';
+import DatasetImage from './DatasetImage';
 
 /** Inline rendering: converts backtick code spans to <code> — safe inside <button> */
 export function InlineText({ text }: { text: string }) {
@@ -52,6 +53,14 @@ export function QuestionMarkdown({ text, className = '' }: { text: string; class
         components={{
           // Prevent ReactMarkdown from wrapping in a block <p> — keep inline flow
           p: ({ children }) => <span>{children}</span>,
+          // Fenced/indented code blocks (RAML, DataWeave…): always wrapped in <pre> by
+          // ReactMarkdown, never for inline `code` spans — so this is the one reliable
+          // signal to tell block code apart from inline code.
+          pre: ({ children }) => (
+            <pre className="block whitespace-pre overflow-x-auto rounded my-1 [overflow-wrap:anywhere]">
+              {children}
+            </pre>
+          ),
           code: ({ children }) => (
             <code className="bg-slate-700/70 px-1.5 py-0.5 rounded text-[0.88em] font-mono text-amber-300 break-words">
               {children}
@@ -59,6 +68,12 @@ export function QuestionMarkdown({ text, className = '' }: { text: string; class
           ),
           strong: ({ children }) => <strong className="font-bold">{children}</strong>,
           em: ({ children }) => <em className="italic">{children}</em>,
+          // Route markdown images through DatasetImage so they get lazy loading, private-repo
+          // resolution and the fullscreen zoom/pan viewer.
+          img: ({ src, alt }) =>
+            typeof src === 'string' ? (
+              <DatasetImage src={src} alt={alt ?? ''} className="my-2 max-w-full rounded border border-slate-700/50" />
+            ) : null,
           a: ({ href, children }) => (
             <a href={href} className="underline text-blue-400" target="_blank" rel="noreferrer">{children}</a>
           ),
