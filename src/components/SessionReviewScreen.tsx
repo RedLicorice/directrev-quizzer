@@ -105,7 +105,7 @@ export default function SessionReviewScreen({ record, onBack }: Props) {
                   <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider">Select {q.selectCount} answers</p>
                 )}
               </div>
-              <QuestionIdBadge id={q.id} />
+              <QuestionIdBadge id={q.id} sourceNumber={q.sourceNumber} />
             </div>
             <p className="text-slate-100 text-base sm:text-lg leading-relaxed">
               <QuestionMarkdown text={q.text} />

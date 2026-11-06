@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import type { ComponentType, LazyExoticComponent } from 'react';
-import type { Mode, SessionConfig, SessionResult, SessionRecord, Question, Stats, PracticeSessionDraft, SourceConfig, DatasetEntry } from './types';
+import type { Mode, SessionConfig, SessionResult, SessionRecord, Question, Stats, PracticeSessionDraft, SourceConfig, DatasetEntry, ExamRules } from './types';
 import { DEFAULT_CONFIGS } from './types';
 import { shuffle } from './utils/shuffle';
 import { weightedSample } from './utils/weightedSample';
 import { isAnswerCorrect } from './utils/scoring';
+import { defaultsForDataset } from './utils/examRules';
 import { exportNotesMarkdown, importNotesMarkdown, isNotesMarkdown, exportStatsMarkdown, importStatsMarkdown, isStatsMarkdown } from './utils/notesMarkdown';
 import HomeScreen from './components/HomeScreen';
 import ConfigScreen from './components/ConfigScreen';
@@ -36,6 +37,17 @@ type AdminScreenProps = { onBack: () => void };
 let AdminScreen: LazyExoticComponent<ComponentType<AdminScreenProps>> | null = null;
 if (import.meta.env.VITE_DEPLOY === 'aws') {
   AdminScreen = lazy(() => import('./aws/admin/AdminScreen'));
+}
+
+type QuestionEditorProps = {
+  datasetId: string;
+  question: Question;
+  onClose: () => void;
+  onReload: () => void;
+};
+let QuestionEditor: LazyExoticComponent<ComponentType<QuestionEditorProps>> | null = null;
+if (import.meta.env.VITE_DEPLOY === 'aws') {
+  QuestionEditor = lazy(() => import('./aws/admin/QuestionEditor'));
 }
 
 const MAX_SESSIONS = 100;
@@ -99,6 +111,8 @@ export default function App() {
   const [isImported, setIsImported] = useState(false); // questions loaded from a file for this session only
   const [active, setActive] = useState<ActiveRef>(initialActive);
   const [datasetTitle, setDatasetTitle] = useState(import.meta.env.VITE_DEPLOY === 'aws' ? 'Quizzer' : BUNDLED_TITLE);
+  const [datasetExam, setDatasetExam] = useState<ExamRules | null>(null);
+  const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [datasetLoading, setDatasetLoading] = useState(false);
   const [datasetError, setDatasetError] = useState<string | null>(null);
 
@@ -108,6 +122,7 @@ export default function App() {
     saveActive(BUNDLED_REF);
     setActive(BUNDLED_REF);
     setDatasetTitle(BUNDLED_TITLE);
+    setDatasetExam(null);
     setAllQuestions(qs);
     setIsImported(false);
     setLoadError(qs.length === 0);
@@ -126,6 +141,7 @@ export default function App() {
       saveActive(ref);
       setActive(ref);
       setDatasetTitle(entry.title);
+      setDatasetExam(entry.exam ?? null);
       setAllQuestions(qs);
       setIsImported(false);
       setLoadError(false);
@@ -195,6 +211,7 @@ export default function App() {
   const handleSetQuestions = useCallback((questions: Question[]) => {
     setActiveDataset(userScoped(IMPORTED_FILE_KEY));
     setDatasetTitle('Imported file (this session only)');
+    setDatasetExam(null);
     setAllQuestions(questions);
     setIsImported(true);
     setLoadError(false);
@@ -371,6 +388,7 @@ export default function App() {
   const handleHistory = useCallback(() => setScreen({ name: 'history' }), []);
   const handleDataset = useCallback(() => setScreen({ name: 'dataset' }), []);
   const handleAdmin = useCallback(() => setScreen({ name: 'admin' }), []);
+  const handleEditQuestion = useCallback((q: Question) => setEditingQuestion(q), []);
   const handleRetry = useCallback((result: SessionResult) => {
     setScreen({ name: 'config', mode: result.mode });
   }, []);
@@ -429,13 +447,26 @@ export default function App() {
   if (screen.name === 'dataset') {
     const stats = readJSON<Stats>(statsKey(), {});
     return (
-      <DatasetScreen
-        questions={allQuestions}
-        stats={stats}
-        onBack={handleHome}
-        onResetStat={handleResetStat}
-        onResetAllStats={handleResetStats}
-      />
+      <>
+        <DatasetScreen
+          questions={allQuestions}
+          stats={stats}
+          onBack={handleHome}
+          onResetStat={handleResetStat}
+          onResetAllStats={handleResetStats}
+          onEditQuestion={import.meta.env.VITE_DEPLOY === 'aws' ? handleEditQuestion : undefined}
+        />
+        {editingQuestion && QuestionEditor && (
+          <Suspense fallback={null}>
+            <QuestionEditor
+              datasetId={active.datasetId}
+              question={editingQuestion}
+              onClose={() => setEditingQuestion(null)}
+              onReload={() => { setEditingQuestion(null); void restoreActive(); }}
+            />
+          </Suspense>
+        )}
+      </>
     );
   }
 
@@ -452,6 +483,8 @@ export default function App() {
         totalQuestions={allQuestions.length}
         seenCount={seenCount}
         savedDraft={screen.mode === 'practice' ? draft : null}
+        defaults={defaultsForDataset(screen.mode, datasetExam)}
+        examRules={datasetExam}
         onStart={handleStartSession}
         onResume={handleResumePractice}
         onImportSession={handleImportSession}

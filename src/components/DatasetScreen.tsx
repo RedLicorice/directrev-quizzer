@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { ArrowLeft, RotateCcw, TrendingDown, TrendingUp, Minus } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { ArrowLeft, RotateCcw, TrendingDown, TrendingUp, Minus, Pencil } from 'lucide-react';
 import type { Question, Stats, QuestionStat } from '../types';
 
 interface Props {
@@ -8,6 +8,8 @@ interface Props {
   onBack: () => void;
   onResetStat: (qId: number) => void;
   onResetAllStats: () => void;
+  /** AWS build + admin only: open the question editor. */
+  onEditQuestion?: (q: Question) => void;
 }
 
 type SortKey = 'id' | 'rate' | 'attempts';
@@ -34,13 +36,24 @@ function RateBar({ rate }: { rate: number | null }) {
   );
 }
 
-export default function DatasetScreen({ questions, stats, onBack, onResetStat, onResetAllStats }: Props) {
+export default function DatasetScreen({ questions, stats, onBack, onResetStat, onResetAllStats, onEditQuestion }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('id');
   const [sortAsc, setSortAsc] = useState(true);
   const [filter, setFilter] = useState<Filter>('all');
   const [confirmReset, setConfirmReset] = useState<number | 'all' | null>(null);
   const [page, setPage] = useState(0);
+  const [canEdit, setCanEdit] = useState(false);
   const PAGE_SIZE = 50;
+
+  // AWS build only: show the edit pencil only when the admin API accepts this session.
+  useEffect(() => {
+    if (!onEditQuestion || import.meta.env.VITE_DEPLOY !== 'aws') return;
+    let cancelled = false;
+    fetch('/api/admin/datasets', { credentials: 'same-origin', headers: { accept: 'application/json' } })
+      .then((r) => { if (!cancelled && r.ok) setCanEdit(true); })
+      .catch(() => { /* not an admin / offline */ });
+    return () => { cancelled = true; };
+  }, [onEditQuestion]);
 
   const totalAttempted = useMemo(() => Object.keys(stats).length, [stats]);
   const totalWeak = useMemo(
@@ -158,7 +171,7 @@ export default function DatasetScreen({ questions, stats, onBack, onResetStat, o
           {/* Table */}
           <div className="card overflow-hidden">
             {/* Column headers */}
-            <div className="grid grid-cols-[2rem_minmax(0,1fr)_5.5rem_1.5rem] sm:grid-cols-[3rem_minmax(0,1fr)_5rem_5rem_6rem_2.5rem] gap-2 px-4 py-2.5 border-b border-slate-700/50 items-center">
+            <div className="grid grid-cols-[2rem_minmax(0,1fr)_5.5rem_3.5rem] sm:grid-cols-[3rem_minmax(0,1fr)_5rem_5rem_6rem_4rem] gap-2 px-4 py-2.5 border-b border-slate-700/50 items-center">
               <SortBtn k="id" label="#" />
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Question</span>
               <span className="hidden sm:block"><SortBtn k="attempts" label="Tries" /></span>
@@ -176,7 +189,7 @@ export default function DatasetScreen({ questions, stats, onBack, onResetStat, o
                   const rate = getRate(stat);
                   const attempts = (stat?.correct ?? 0) + (stat?.wrong ?? 0);
                   return (
-                    <div key={q.id} className="grid grid-cols-[2rem_minmax(0,1fr)_5.5rem_1.5rem] sm:grid-cols-[3rem_minmax(0,1fr)_5rem_5rem_6rem_2.5rem] gap-2 px-4 py-3 items-center hover:bg-slate-800/30 transition-colors">
+                    <div key={q.id} className="grid grid-cols-[2rem_minmax(0,1fr)_5.5rem_3.5rem] sm:grid-cols-[3rem_minmax(0,1fr)_5rem_5rem_6rem_4rem] gap-2 px-4 py-3 items-center hover:bg-slate-800/30 transition-colors">
                       <span className="text-xs text-slate-500 tabular-nums font-medium">{q.id}</span>
                       <p className="text-sm text-slate-300 leading-snug line-clamp-2 min-w-0">{q.text}</p>
                       <span className="hidden sm:block text-xs text-slate-400 tabular-nums text-center">{attempts || '–'}</span>
@@ -190,7 +203,16 @@ export default function DatasetScreen({ questions, stats, onBack, onResetStat, o
                         ) : <span className="text-slate-600">–</span>}
                       </span>
                       <RateBar rate={rate} />
-                      <div className="flex justify-end">
+                      <div className="flex justify-end items-center gap-1">
+                        {onEditQuestion && canEdit && (
+                          <button
+                            onClick={() => onEditQuestion(q)}
+                            title="Modifica domanda (admin)"
+                            className="p-1 text-slate-600 hover:text-amber-400 transition-colors"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         {stat && attempts > 0 && (
                           <button
                             onClick={() => setConfirmReset(q.id)}

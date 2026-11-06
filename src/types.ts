@@ -6,6 +6,8 @@ export interface Option {
 
 export interface Question {
   id: number;
+  /** Number of the question in the source document, when it has one (e.g. "12", "T2-14"). */
+  sourceNumber?: string;
   text: string;
   options: Option[];
   selectCount: number;
@@ -50,6 +52,17 @@ export interface DatasetEntry {
   questions?: number;
   images?: number;
   source?: string;    // free text / URL describing where the questions come from
+  exam?: ExamRules;   // official exam format, used as the default for exam/practice
+}
+
+/** Official exam format carried by a dataset's index.json (all fields optional). */
+export interface ExamRules {
+  name?: string;
+  code?: string;
+  questionCount?: number;    // scored questions in the real exam
+  unscoredMax?: number;      // extra unscored questions (e.g. MuleSoft: up to 5)
+  durationMinutes?: number;
+  passPercent?: number;
 }
 
 export interface DatasetIndex {

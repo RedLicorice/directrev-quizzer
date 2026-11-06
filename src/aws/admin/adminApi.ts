@@ -78,6 +78,21 @@ export const signOutUser = (key: string) => mutate(`/api/admin/users/${key}/sign
 export const resetUserPassword = (key: string) => mutate(`/api/admin/users/${key}/reset`, 'POST');
 export const deleteUser = (key: string) => mutate(`/api/admin/users/${key}`, 'DELETE');
 
+// ── dataset editing (admin, M7/P1) ────────────────────────────────────────────
+
+export interface DatasetQuestionFile {
+  sha: string;
+  question: import('../../types').Question;
+}
+
+/** Latest repo copy of a question (the active dataset may be served from S3). */
+export const getDatasetQuestion = (datasetId: string, qid: number) =>
+  request<DatasetQuestionFile>(`/api/admin/datasets/${datasetId}/questions/${qid}`);
+
+/** Commits one question to the dataset repo (the publish workflow updates S3). */
+export const saveDatasetQuestion = (datasetId: string, qid: number, baseSha: string, question: import('../../types').Question) =>
+  mutate<{ sha: string; commit: string }>(`/api/admin/datasets/${datasetId}/questions/${qid}`, 'PUT', { baseSha, question });
+
 // Human-readable message for an AdminApiError code.
 export function errorText(e: unknown): string {
   if (e instanceof AdminApiError) {
@@ -91,6 +106,10 @@ export function errorText(e: unknown): string {
       case 'mcd_confirmation_required': return 'Conferma esplicitamente l’accesso a mule-mcd-01.';
       case 'rate_limited': return 'Troppe operazioni: riprova più tardi.';
       case 'not_found': return 'Utente non trovato.';
+      case 'dataset_not_editable': return 'Questo dataset non è modificabile da qui (serve un repo GitHub configurato).';
+      case 'conflict': return 'Il dataset è cambiato nel frattempo: ricarica la domanda e riapplica le modifiche.';
+      case 'invalid_question': return 'La domanda non è valida: controlla testo, opzioni, risposta corretta e selectCount.';
+      case 'github_error': return 'GitHub non ha accettato la modifica (token mancante/scaduto o permessi insufficienti).';
       default: return `Errore ${e.status} (${e.code}).`;
     }
   }

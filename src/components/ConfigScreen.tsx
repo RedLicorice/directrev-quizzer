@@ -1,13 +1,15 @@
 import { useRef, useState } from 'react';
 import { ArrowLeft, Play, Zap, RotateCcw, Upload } from 'lucide-react';
-import type { Mode, SessionConfig, PracticeSessionDraft } from '../types';
-import { DEFAULT_CONFIGS } from '../types';
+import type { Mode, SessionConfig, PracticeSessionDraft, ExamRules } from '../types';
+import { examRulesSummary } from '../utils/examRules';
 
 interface Props {
   mode: Mode;
   totalQuestions: number;
   seenCount: number;
   savedDraft: PracticeSessionDraft | null;
+  defaults: SessionConfig;
+  examRules?: ExamRules | null;
   onStart: (mode: Mode, config: SessionConfig) => void;
   onResume: (draft: PracticeSessionDraft) => void;
   onImportSession: (data: unknown) => boolean;
@@ -20,13 +22,14 @@ const LABELS: Record<Mode, { title: string; color: string }> = {
   flashcard: { title: 'Flashcard Mode', color: 'text-blue-400' },
 };
 
-export default function ConfigScreen({ mode, totalQuestions, seenCount, savedDraft, onStart, onResume, onImportSession, onBack }: Props) {
-  const [config, setConfig] = useState<SessionConfig>({ ...DEFAULT_CONFIGS[mode] });
+export default function ConfigScreen({ mode, totalQuestions, seenCount, savedDraft, defaults, examRules, onStart, onResume, onImportSession, onBack }: Props) {
+  const [config, setConfig] = useState<SessionConfig>({ ...defaults });
   const [importError, setImportError] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const maxQ = Math.max(totalQuestions, 1);
   const { title, color } = LABELS[mode];
+  const examSummary = examRulesSummary(examRules);
 
   function update<K extends keyof SessionConfig>(key: K, val: SessionConfig[K]) {
     setConfig((c) => ({ ...c, [key]: val }));
@@ -63,6 +66,22 @@ export default function ConfigScreen({ mode, totalQuestions, seenCount, savedDra
             <p className={`text-sm font-semibold uppercase tracking-widest ${color} mb-1`}>Configure</p>
             <h1 className="text-2xl font-bold">{title}</h1>
           </div>
+
+          {examSummary && (
+            <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 px-4 py-3 space-y-1.5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                {examRules?.name ? `Formato ufficiale · ${examRules.name}` : 'Formato ufficiale'}
+              </p>
+              <p className="text-sm text-slate-300">{examSummary}</p>
+              <button
+                type="button"
+                onClick={() => setConfig({ ...defaults })}
+                className="text-xs text-amber-400 hover:text-amber-300 transition-colors"
+              >
+                Ripristina i default ufficiali
+              </button>
+            </div>
+          )}
 
           {/* Resume saved draft (practice only) */}
           {mode === 'practice' && savedDraft && (

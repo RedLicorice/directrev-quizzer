@@ -106,7 +106,7 @@ export default function FlashcardSession({ questions, onExit }: Props) {
               <div ref={frontRef} className="w-full flex flex-col items-center">
                 <div className="mb-6 flex items-center gap-2">
                   <span className="text-xs font-semibold uppercase tracking-widest text-slate-500">Question</span>
-                  <QuestionIdBadge id={q.id} />
+                  <QuestionIdBadge id={q.id} sourceNumber={q.sourceNumber} />
                 </div>
                 {q.selectCount > 1 && (
                   <span className="text-xs font-semibold text-amber-400 mb-3">
