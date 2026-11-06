@@ -16,6 +16,7 @@ import type { SessionClaims } from '../../../edge/session-core.js';
 import type { Config } from '../../auth/src/config.js';
 import type { KeyStore } from '../../auth/src/keys.js';
 import { getCookie } from '../../auth/src/cookies.js';
+import { GithubError, type GithubClient } from './github.js';
 
 export interface UrlEvent {
   rawPath: string;
@@ -75,6 +76,7 @@ export interface Deps {
   getConfig(): Promise<Config>;
   keys: KeyStore;
   cognito: CognitoAdmin;
+  github: GithubClient;
   readAudit(sinceMs: number, limit: number): Promise<AuditEntry[]>;
   nowMs(): number;
   log(entry: Record<string, unknown>): void;
@@ -173,6 +175,41 @@ function publicUser(u: AdminUser) {
     enabled: u.enabled,
     groups: [...u.groups].sort(),
   };
+}
+
+/** Structural validation shared by the editor route and its tests. */
+function validateQuestion(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return 'question_shape';
+  const q = value as Record<string, unknown>;
+  if (!Number.isInteger(q.id) || (q.id as number) < 1) return 'id';
+  if (typeof q.text !== 'string' || (!q.text.trim() && typeof q.image !== 'string')) return 'text';
+  if (q.sourceNumber !== undefined && (typeof q.sourceNumber !== 'string' || q.sourceNumber.length > 40)) return 'source_number';
+  if (q.explanation !== undefined && typeof q.explanation !== 'string') return 'explanation';
+  const options = q.options;
+  if (!Array.isArray(options) || options.length < 2) return 'options';
+  let correct = 0;
+  for (const raw of options) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 'option_shape';
+    const o = raw as Record<string, unknown>;
+    if (typeof o.correct !== 'boolean') return 'option_correct';
+    if (o.correct) correct++;
+    if (typeof o.text !== 'string' || (!o.text.trim() && typeof o.image !== 'string')) return 'option_text';
+  }
+  if (correct === 0) return 'no_correct';
+  if (q.selectCount !== correct) return 'select_count';
+  return null;
+}
+
+function validateAll(questions: unknown[]): string | null {
+  const ids = new Set<number>();
+  for (const raw of questions) {
+    const reason = validateQuestion(raw);
+    if (reason) return reason;
+    const id = (raw as { id: number }).id;
+    if (ids.has(id)) return 'duplicate_id';
+    ids.add(id);
+  }
+  return null;
 }
 
 export function createHandler(deps: Deps) {
@@ -339,6 +376,92 @@ export function createHandler(deps: Deps) {
         }
 
         return json(405, { error: 'method_not_allowed' }, 'PUT, POST, DELETE');
+      }
+
+      // ── dataset editor (P1): read/commit one question in its dataset repo ─────
+      if (path === `${BASE}/datasets` && (method === 'GET' || method === 'HEAD')) {
+        const repos = cfg.datasetRepos ?? {};
+        const datasets = Object.entries(repos)
+          .map(([id, r]) => ({ id, repo: r.repo }))
+          .sort((a, b) => a.id.localeCompare(b.id));
+        return json(200, { datasets });
+      }
+
+      const editMatch = path.match(/^\/api\/admin\/datasets\/([a-z0-9][a-z0-9-]{0,62})\/questions\/(\d+)$/);
+      if (editMatch) {
+        const datasetId = editMatch[1]!;
+        const qid = Number(editMatch[2]);
+        const repoCfg = cfg.datasetRepos?.[datasetId];
+        if (!repoCfg) return json(404, { error: 'dataset_not_editable' });
+        const editing = method === 'PUT';
+        if (editing && !limited(`mut:${actor}`, MUTATIONS_PER_HOUR, 3_600_000)) return json(429, { error: 'rate_limited' });
+        if (!editing && method !== 'GET' && method !== 'HEAD') return json(405, { error: 'method_not_allowed' }, 'GET, PUT');
+
+        let file: { content: string; sha: string } | null;
+        try {
+          file = await deps.github.getFile(repoCfg.repo, repoCfg.file);
+        } catch (e) {
+          deps.log({ evt: 'github_error', ip, path, error: e instanceof Error ? e.message : String(e) });
+          return json(502, { error: 'github_error' });
+        }
+        if (!file) return json(404, { error: 'dataset_not_editable' });
+
+        let questions: unknown;
+        try {
+          questions = JSON.parse(file.content);
+        } catch {
+          return json(502, { error: 'github_error' });
+        }
+        if (!Array.isArray(questions)) return json(502, { error: 'github_error' });
+        const found = questions.find((q) => !!q && typeof q === 'object' && (q as { id?: unknown }).id === qid);
+        if (found === undefined) return json(404, { error: 'not_found' });
+
+        if (!editing) return json(200, { sha: file.sha, question: found });
+
+        const body = readBody(ev);
+        if (!body) return json(400, { error: 'bad_json' });
+        if (typeof body.baseSha !== 'string' || body.baseSha !== file.sha) return json(409, { error: 'conflict' });
+        const incoming = body.question;
+        if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return json(400, { error: 'invalid_question' });
+        const q = incoming as Record<string, unknown>;
+        if (q.id !== qid) return json(400, { error: 'invalid_question', reason: 'id_changed' });
+        const reason = validateQuestion(q);
+        if (reason) return json(400, { error: 'invalid_question', reason });
+
+        // Replace in place: keep the array order, the internal id and the image paths.
+        const idx = questions.indexOf(found);
+        const original = found as Record<string, unknown>;
+        const merged: Record<string, unknown> = { ...original };
+        for (const k of ['text', 'options', 'selectCount', 'explanation', 'sourceNumber']) {
+          if (Object.prototype.hasOwnProperty.call(q, k)) merged[k] = q[k];
+          else delete merged[k];
+        }
+        merged.id = qid;
+        if (Object.prototype.hasOwnProperty.call(original, 'image')) merged.image = original.image;
+        if (Object.prototype.hasOwnProperty.call(original, 'explanationImage')) merged.explanationImage = original.explanationImage;
+        questions[idx] = merged;
+
+        const allReason = validateAll(questions);
+        if (allReason) return json(400, { error: 'invalid_question', reason: allReason });
+
+        const trailing = file.content.endsWith('\n');
+        const pretty = file.content.includes('\n');
+        const content = (pretty ? JSON.stringify(questions, null, 2) : JSON.stringify(questions)) + (trailing ? '\n' : '');
+        try {
+          const out = await deps.github.putFile(
+            repoCfg.repo,
+            repoCfg.file,
+            content,
+            file.sha,
+            `fix(dataset): edit question ${qid}\n\nEdited via Quizzer admin by ${actor}.`,
+          );
+          audit('question_edit', `${datasetId}#${qid}`);
+          return json(200, { sha: out.sha, commit: out.commit });
+        } catch (e) {
+          if (e instanceof GithubError && e.status === 409) return json(409, { error: 'conflict' });
+          deps.log({ evt: 'github_error', ip, path, error: e instanceof Error ? e.message : String(e) });
+          return json(502, { error: 'github_error' });
+        }
       }
 
       return json(404, { error: 'not_found' });

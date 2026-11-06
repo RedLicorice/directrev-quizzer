@@ -8,10 +8,11 @@ locals {
   }
   app_repo = "${var.github_owner}/${var.app_repo_name}"
 
-  edge_function_file    = coalesce(var.edge_function_file, "${path.module}/../../edge/session-check.js")
-  auth_lambda_dist_dir  = coalesce(var.auth_lambda_dist_dir, "${path.module}/../../lambda/auth/dist")
-  admin_lambda_dist_dir = coalesce(var.admin_lambda_dist_dir, "${path.module}/../../lambda/admin/dist")
-  config_parameter      = "/quizzer/${var.environment}/config"
+  edge_function_file     = coalesce(var.edge_function_file, "${path.module}/../../edge/session-check.js")
+  auth_lambda_dist_dir   = coalesce(var.auth_lambda_dist_dir, "${path.module}/../../lambda/auth/dist")
+  admin_lambda_dist_dir  = coalesce(var.admin_lambda_dist_dir, "${path.module}/../../lambda/admin/dist")
+  config_parameter       = "/quizzer/${var.environment}/config"
+  github_token_parameter = "/quizzer/${var.environment}/github-datasets-token"
 }
 
 module "edge" {
@@ -35,18 +36,19 @@ data "archive_file" "admin" {
 }
 
 module "lambdas" {
-  source                = "../../modules/lambdas"
-  name_prefix           = local.name_prefix
-  account_id            = var.account_id
-  region                = var.region
-  auth_zip_path         = data.archive_file.auth.output_path
-  auth_zip_sha256       = data.archive_file.auth.output_base64sha256
-  admin_zip_path        = data.archive_file.admin.output_path
-  admin_zip_sha256      = data.archive_file.admin.output_base64sha256
-  config_parameter_name = local.config_parameter
-  kvs_arn               = module.edge.kvs_arn
-  distribution_arn      = module.site.distribution_arn
-  log_retention_days    = var.log_retention_days
+  source                      = "../../modules/lambdas"
+  name_prefix                 = local.name_prefix
+  account_id                  = var.account_id
+  region                      = var.region
+  auth_zip_path               = data.archive_file.auth.output_path
+  auth_zip_sha256             = data.archive_file.auth.output_base64sha256
+  admin_zip_path              = data.archive_file.admin.output_path
+  admin_zip_sha256            = data.archive_file.admin.output_base64sha256
+  config_parameter_name       = local.config_parameter
+  github_token_parameter_name = local.github_token_parameter
+  kvs_arn                     = module.edge.kvs_arn
+  distribution_arn            = module.site.distribution_arn
+  log_retention_days          = var.log_retention_days
 }
 
 module "site" {
@@ -80,12 +82,15 @@ resource "aws_ssm_parameter" "config" {
   type        = "String"
   tier        = "Standard"
   value = jsonencode({
-    userPoolId        = module.identity.user_pool_id
-    clientId          = module.identity.client_id
-    cognitoDomain     = module.identity.cognito_domain
-    region            = var.region
-    appHosts          = [module.site.distribution_domain_name]
-    datasets          = sort(var.dataset_ids)
+    userPoolId    = module.identity.user_pool_id
+    clientId      = module.identity.client_id
+    cognitoDomain = module.identity.cognito_domain
+    region        = var.region
+    appHosts      = [module.site.distribution_domain_name]
+    datasets      = sort(var.dataset_ids)
+    datasetRepos = {
+      for id, d in local.datasets : id => { repo = d.repo, file = "questions.json" }
+    }
     sessionTtlSeconds = 1800
     refreshCookieDays = 30
   })

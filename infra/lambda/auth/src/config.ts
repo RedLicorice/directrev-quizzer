@@ -3,6 +3,11 @@
 // distribution -> function URL -> function -> (client id, distribution domain): plan v2 §4.4.
 import { DATASET_RE } from '../../../edge/session-core.js';
 
+export interface DatasetRepo {
+  repo: string; // owner/name
+  file: string; // questions.json inside the repo
+}
+
 export interface Config {
   userPoolId: string;
   clientId: string;
@@ -12,9 +17,13 @@ export interface Config {
   datasets: string[];
   sessionTtlSeconds: number;
   refreshCookieDays: number;
+  /** Admin-only: where each dataset lives, for the in-app editor (M7/P1). */
+  datasetRepos?: Record<string, DatasetRepo>;
 }
 
 const HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const FILE_RE = /^[A-Za-z0-9._/-]+$/;
 
 export function parseConfig(raw: string): Config {
   const c = JSON.parse(raw) as Partial<Config>;
@@ -36,6 +45,29 @@ export function parseConfig(raw: string): Config {
   const days = c.refreshCookieDays ?? 30;
   if (!Number.isInteger(ttl) || ttl < 60 || ttl > 3600) throw new Error('config.sessionTtlSeconds out of range');
   if (!Number.isInteger(days) || days < 1 || days > 365) throw new Error('config.refreshCookieDays out of range');
+
+  let datasetRepos: Record<string, DatasetRepo> | undefined;
+  if (c.datasetRepos !== undefined) {
+    const raw = c.datasetRepos;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('config.datasetRepos must be an object');
+    datasetRepos = {};
+    for (const [id, value] of Object.entries(raw)) {
+      if (!DATASET_RE.test(id)) throw new Error(`config.datasetRepos: invalid dataset id "${id}"`);
+      const entry = value as Partial<DatasetRepo> | null;
+      if (
+        !entry ||
+        typeof entry.repo !== 'string' ||
+        !REPO_RE.test(entry.repo) ||
+        typeof entry.file !== 'string' ||
+        !FILE_RE.test(entry.file) ||
+        entry.file.includes('..')
+      ) {
+        throw new Error(`config.datasetRepos["${id}"] must be {repo: "owner/name", file: "questions.json"}`);
+      }
+      datasetRepos[id] = { repo: entry.repo, file: entry.file };
+    }
+  }
+
   return {
     userPoolId: str(c.userPoolId, 'userPoolId'),
     clientId: str(c.clientId, 'clientId'),
@@ -45,6 +77,7 @@ export function parseConfig(raw: string): Config {
     datasets: [...datasets].sort(),
     sessionTtlSeconds: ttl,
     refreshCookieDays: days,
+    ...(datasetRepos ? { datasetRepos } : {}),
   };
 }
 

@@ -5,8 +5,9 @@
 locals {
   function_name = "${var.name_prefix}-auth"
   # ARN built from the name: no dependency on the aws_ssm_parameter resource.
-  config_parameter_arn = "arn:aws:ssm:${var.region}:${var.account_id}:parameter${var.config_parameter_name}"
-  log_group_arn        = "arn:aws:logs:${var.region}:${var.account_id}:log-group:/aws/lambda/${local.function_name}"
+  config_parameter_arn       = "arn:aws:ssm:${var.region}:${var.account_id}:parameter${var.config_parameter_name}"
+  github_token_parameter_arn = "arn:aws:ssm:${var.region}:${var.account_id}:parameter${var.github_token_parameter_name}"
+  log_group_arn              = "arn:aws:logs:${var.region}:${var.account_id}:log-group:/aws/lambda/${local.function_name}"
 }
 
 resource "aws_cloudwatch_log_group" "auth" {
@@ -164,6 +165,23 @@ locals {
         Resource = [local.config_parameter_arn]
       },
       {
+        Sid      = "ReadGithubToken"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = [local.github_token_parameter_arn]
+      },
+      {
+        # SecureString decryption with the account's default aws/ssm key.
+        #checkov:skip=CKV_AWS_356:kms:Decrypt is constrained by kms:ViaService to SSM in this account/region
+        Sid      = "DecryptGithubToken"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = ["arn:aws:kms:${var.region}:${var.account_id}:key/*"]
+        Condition = {
+          StringEquals = { "kms:ViaService" = "ssm.${var.region}.amazonaws.com" }
+        }
+      },
+      {
         Sid      = "ReadSessionKeys"
         Effect   = "Allow"
         Action   = ["cloudfront-keyvaluestore:GetKey", "cloudfront-keyvaluestore:DescribeKeyValueStore"]
@@ -222,9 +240,10 @@ resource "aws_lambda_function" "admin" {
 
   environment {
     variables = {
-      CONFIG_PARAMETER = var.config_parameter_name
-      KVS_ARN          = var.kvs_arn
-      NODE_OPTIONS     = "--enable-source-maps"
+      CONFIG_PARAMETER       = var.config_parameter_name
+      KVS_ARN                = var.kvs_arn
+      GITHUB_TOKEN_PARAMETER = var.github_token_parameter_name
+      NODE_OPTIONS           = "--enable-source-maps"
     }
   }
 

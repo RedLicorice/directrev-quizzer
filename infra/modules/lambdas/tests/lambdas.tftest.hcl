@@ -9,16 +9,17 @@ mock_provider "aws" {
 }
 
 variables {
-  name_prefix           = "quizzer-test"
-  account_id            = "123456789012"
-  region                = "eu-central-1"
-  auth_zip_path         = "auth.zip"
-  auth_zip_sha256       = "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
-  admin_zip_path        = "admin.zip"
-  admin_zip_sha256      = "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
-  config_parameter_name = "/quizzer/prod/config"
-  kvs_arn               = "arn:aws:cloudfront::123456789012:key-value-store/0000-kvs"
-  distribution_arn      = "arn:aws:cloudfront::123456789012:distribution/E1TESTDIST"
+  name_prefix                 = "quizzer-test"
+  account_id                  = "123456789012"
+  region                      = "eu-central-1"
+  auth_zip_path               = "auth.zip"
+  auth_zip_sha256             = "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+  admin_zip_path              = "admin.zip"
+  admin_zip_sha256            = "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+  config_parameter_name       = "/quizzer/prod/config"
+  github_token_parameter_name = "/quizzer/prod/github-datasets-token"
+  kvs_arn                     = "arn:aws:cloudfront::123456789012:key-value-store/0000-kvs"
+  distribution_arn            = "arn:aws:cloudfront::123456789012:distribution/E1TESTDIST"
 }
 
 run "function" {
@@ -48,7 +49,7 @@ run "admin_function" {
     error_message = "Admin Lambda: Node 22 on arm64."
   }
   assert {
-    condition     = tomap(aws_lambda_function.admin.environment[0].variables) == tomap({ CONFIG_PARAMETER = "/quizzer/prod/config", KVS_ARN = "arn:aws:cloudfront::123456789012:key-value-store/0000-kvs", NODE_OPTIONS = "--enable-source-maps" })
+    condition     = tomap(aws_lambda_function.admin.environment[0].variables) == tomap({ CONFIG_PARAMETER = "/quizzer/prod/config", KVS_ARN = "arn:aws:cloudfront::123456789012:key-value-store/0000-kvs", GITHUB_TOKEN_PARAMETER = "/quizzer/prod/github-datasets-token", NODE_OPTIONS = "--enable-source-maps" })
     error_message = "Admin env: parameter name and KVS ARN only (no Cognito ids in the graph)."
   }
   assert {
@@ -107,8 +108,8 @@ run "least_privilege" {
     error_message = "Only Lambda can assume the role."
   }
   assert {
-    condition     = [for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s.Sid] == ["Logs", "ReadAuditLogs", "ReadConfig", "ReadSessionKeys", "CognitoUserManagement"]
-    error_message = "Admin policy statements: logs (write + audit read), config, KVS keys, Cognito user management."
+    condition     = [for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s.Sid] == ["Logs", "ReadAuditLogs", "ReadConfig", "ReadGithubToken", "DecryptGithubToken", "ReadSessionKeys", "CognitoUserManagement"]
+    error_message = "Admin policy statements: logs (write + audit read), config, GitHub token (+ decrypt), KVS keys, Cognito user management."
   }
   assert {
     condition     = one([for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s if s.Sid == "CognitoUserManagement"]).Resource == ["arn:aws:cognito-idp:eu-central-1:123456789012:userpool/*"]

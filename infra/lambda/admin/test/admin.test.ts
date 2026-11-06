@@ -6,6 +6,7 @@ import { SESSION_COOKIE } from '../../../edge/session-core.js';
 import { setup, ev, token, ADMIN_EMAIL } from './fakes.js';
 import { decodeUid } from '../src/handler.js';
 import { createInMemoryLimiter } from '../src/limiter.js';
+import { GithubError } from '../src/github.js';
 
 const cookie = (t: string) => [`${SESSION_COOKIE}=${t}`];
 const admin = () => token('sub-admin', ADMIN_EMAIL, { adm: true, ds: ['*'] });
@@ -190,6 +191,94 @@ describe('overview, audit and routing', () => {
     expect((await t.handler(ev('GET', '/api/admin/users', ctx(admin())))).statusCode).toBe(200);
     t.advance(61);
     expect((await t.handler(ev('GET', '/api/admin/users', ctx(admin())))).statusCode).toBe(403);
+  });
+});
+
+describe('dataset editor', () => {
+  const repo = 'o/quizzer-dataset-aws-dva-c02';
+  const file = 'questions.json';
+  const q1 = { id: 1, text: 'Q1', options: [{ text: 'A', correct: true }, { text: 'B', correct: false }], selectCount: 1, explanation: 'E1' };
+  const q2 = { id: 2, text: 'Q2', options: [{ text: 'A', correct: true }, { text: 'B', correct: false }], selectCount: 1 };
+  const seed = (t: ReturnType<typeof setup>) => t.github.seed(repo, file, JSON.stringify([q1, q2], null, 2) + '\n');
+  const url = (qid = 1) => `/api/admin/datasets/aws-dva-c02/questions/${qid}`;
+
+  it('lists the editable datasets', async () => {
+    const t = setup();
+    const r = await t.handler(ev('GET', '/api/admin/datasets', ctx(admin())));
+    expect(r.statusCode).toBe(200);
+    expect(JSON.parse(r.body!)).toEqual({
+      datasets: [
+        { id: 'aws-dva-c02', repo: 'o/quizzer-dataset-aws-dva-c02' },
+        { id: 'mule-mcd-01', repo: 'o/quizzer-dataset-mule-mcd-01' },
+      ],
+    });
+  });
+
+  it('GET returns the repo version and sha', async () => {
+    const t = setup();
+    const sha = seed(t);
+    const r = await t.handler(ev('GET', url(), ctx(admin())));
+    expect(r.statusCode).toBe(200);
+    expect(JSON.parse(r.body!)).toEqual({ sha, question: q1 });
+  });
+
+  it('PUT commits one edited question and preserves the rest', async () => {
+    const t = setup();
+    const sha = seed(t);
+    const edited = {
+      ...q1,
+      text: 'Q1 fixed',
+      options: [{ text: 'A', correct: false }, { text: 'B', correct: true }],
+      selectCount: 1,
+      sourceNumber: '7',
+    };
+    const r = await t.handler(ev('PUT', url(), { ...ctx(admin()), body: JSON.stringify({ baseSha: sha, question: edited }) }));
+    expect(r.statusCode).toBe(200);
+    expect(t.github.commits).toHaveLength(1);
+    expect(t.github.commits[0]!.message).toContain('edit question 1');
+    const content = JSON.parse(t.github.files.get(`${repo}/${file}`)!.content) as Array<Record<string, unknown>>;
+    expect(content[0]).toMatchObject({ id: 1, text: 'Q1 fixed', selectCount: 1, sourceNumber: '7' });
+    expect(content[1]).toMatchObject({ id: 2, text: 'Q2' });
+    expect(t.audit.some((e) => e.action === 'question_edit' && e.target === 'aws-dva-c02#1')).toBe(true);
+  });
+
+  it('rejects a stale baseSha with 409', async () => {
+    const t = setup();
+    seed(t);
+    const r = await t.handler(ev('PUT', url(), { ...ctx(admin()), body: JSON.stringify({ baseSha: 'stale', question: q1 }) }));
+    expect(r.statusCode).toBe(409);
+    expect(t.github.commits).toHaveLength(0);
+  });
+
+  it('rejects an invalid edit (selectCount / id) with 400', async () => {
+    const t = setup();
+    const sha = seed(t);
+    const badCount = { ...q1, selectCount: 2 };
+    const r1 = await t.handler(ev('PUT', url(), { ...ctx(admin()), body: JSON.stringify({ baseSha: sha, question: badCount }) }));
+    expect(r1.statusCode).toBe(400);
+    expect(JSON.parse(r1.body!).reason).toBe('select_count');
+    const changedId = { ...q1, id: 2 };
+    const r2 = await t.handler(ev('PUT', url(), { ...ctx(admin()), body: JSON.stringify({ baseSha: sha, question: changedId }) }));
+    expect(r2.statusCode).toBe(400);
+    expect(t.github.commits).toHaveLength(0);
+  });
+
+  it('admin-only and unknown dataset', async () => {
+    const t = setup();
+    t.github.seed(repo, file, '[]');
+    expect((await t.handler(ev('GET', url(), ctx(member())))).statusCode).toBe(403);
+    expect((await t.handler(ev('GET', '/api/admin/datasets/nope/questions/1', ctx(admin())))).statusCode).toBe(404);
+    expect((await t.handler(ev('GET', '/api/admin/datasets/aws-dva-c02/questions/999', ctx(admin())))).statusCode).toBe(404);
+  });
+
+  it('maps a GitHub failure to 502', async () => {
+    const t = setup();
+    const sha = seed(t);
+    const original = t.github.putFile.bind(t.github);
+    t.github.putFile = async () => { throw new GithubError(500); };
+    const r = await t.handler(ev('PUT', url(), { ...ctx(admin()), body: JSON.stringify({ baseSha: sha, question: q1 }) }));
+    expect(r.statusCode).toBe(502);
+    t.github.putFile = original;
   });
 });
 

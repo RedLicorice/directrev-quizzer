@@ -25,6 +25,11 @@ variable "config_parameter_name" {
   type        = string
 }
 
+variable "github_token_parameter_name" {
+  description = "Name of the SSM SecureString holding the fine-grained GitHub token (Contents: read/write on the dataset repos)."
+  type        = string
+}
+
 variable "kvs_arn" {
   type = string
 }

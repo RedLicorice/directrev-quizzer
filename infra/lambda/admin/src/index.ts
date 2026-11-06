@@ -5,11 +5,15 @@ import { CloudFrontKeyValueStoreClient, GetKeyCommand } from '@aws-sdk/client-cl
 import { createConfigLoader } from '../../auth/src/config.js';
 import { createKeyStore } from '../../auth/src/keys.js';
 import { createCognitoAdmin, createAuditReader } from './aws.js';
+import { createGithubClient } from './github.js';
 import { createInMemoryLimiter } from './limiter.js';
 import { createHandler } from './handler.js';
 
 const CONFIG_PARAMETER = process.env.CONFIG_PARAMETER ?? '';
 const KVS_ARN = process.env.KVS_ARN ?? '';
+// Fine-grained GitHub token (Contents: read/write on the dataset repos), stored as an SSM
+// SecureString and never exposed to the browser.
+const GITHUB_TOKEN_PARAMETER = process.env.GITHUB_TOKEN_PARAMETER ?? '';
 // Set automatically by the Lambda runtime; used to read our own audit records.
 const LOG_GROUP = process.env.AWS_LAMBDA_LOG_GROUP_NAME ?? '';
 
@@ -36,10 +40,21 @@ const keys = createKeyStore(async (key) => {
   }
 }, Date.now);
 
+let githubToken: { value: string; at: number } | null = null;
+async function getGithubToken(): Promise<string> {
+  if (githubToken && Date.now() - githubToken.at < 5 * 60_000) return githubToken.value;
+  const r = await ssm.send(new GetParameterCommand({ Name: GITHUB_TOKEN_PARAMETER, WithDecryption: true }));
+  const value = r.Parameter?.Value;
+  if (!value) throw new Error('GitHub token parameter empty');
+  githubToken = { value, at: Date.now() };
+  return value;
+}
+
 export const handler = createHandler({
   getConfig,
   keys,
   cognito: createCognitoAdmin(async () => (await getConfig()).userPoolId),
+  github: createGithubClient(getGithubToken),
   readAudit: createAuditReader(LOG_GROUP),
   nowMs: Date.now,
   log: (entry) => console.log(JSON.stringify(entry)),

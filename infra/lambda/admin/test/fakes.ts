@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto';
 import { signSession } from '../../../edge/session-core.js';
 import { createKeyStore } from '../../auth/src/keys.js';
 import type { Config } from '../../auth/src/config.js';
+import { GithubError, type GithubClient } from '../src/github.js';
 import {
   createHandler,
   type AdminUser,
@@ -22,6 +23,10 @@ export const CONFIG: Config = {
   region: 'us-east-1',
   appHosts: ['d111111abcdef8.cloudfront.net'],
   datasets: ['aws-dva-c02', 'mule-mcd-01'],
+  datasetRepos: {
+    'aws-dva-c02': { repo: 'o/quizzer-dataset-aws-dva-c02', file: 'questions.json' },
+    'mule-mcd-01': { repo: 'o/quizzer-dataset-mule-mcd-01', file: 'questions.json' },
+  },
   sessionTtlSeconds: 1800,
   refreshCookieDays: 30,
 };
@@ -100,8 +105,34 @@ export class FakeCognito implements CognitoAdmin {
   }
 }
 
+export class FakeGithub implements GithubClient {
+  files = new Map<string, { content: string; sha: string }>();
+  commits: { repo: string; path: string; content: string; message: string }[] = [];
+  private seq = 0;
+  private key(repo: string, path: string) {
+    return `${repo}/${path}`;
+  }
+  seed(repo: string, path: string, content: string) {
+    const sha = `sha-${++this.seq}`;
+    this.files.set(this.key(repo, path), { content, sha });
+    return sha;
+  }
+  async getFile(repo: string, path: string) {
+    return this.files.get(this.key(repo, path)) ?? null;
+  }
+  async putFile(repo: string, path: string, content: string, sha: string, message: string) {
+    const f = this.files.get(this.key(repo, path));
+    if (!f || f.sha !== sha) throw new GithubError(409);
+    const next = `sha-${++this.seq}`;
+    this.files.set(this.key(repo, path), { content, sha: next });
+    this.commits.push({ repo, path, content, message });
+    return { sha: next, commit: `commit-${this.seq}` };
+  }
+}
+
 export function setup(opts: { limiter?: Limiter } = {}) {
   const cognito = new FakeCognito();
+  const github = new FakeGithub();
   const logs: Record<string, unknown>[] = [];
   const audit: AuditEntry[] = [];
   let nowMs = NOW_SEC * 1000;
@@ -110,6 +141,7 @@ export function setup(opts: { limiter?: Limiter } = {}) {
     getConfig: async () => CONFIG,
     keys,
     cognito,
+    github,
     readAudit: async (sinceMs, limit) =>
       audit.filter((e) => Date.parse(e.at) >= sinceMs).slice(0, limit).reverse(),
     nowMs: () => nowMs,
@@ -121,6 +153,7 @@ export function setup(opts: { limiter?: Limiter } = {}) {
   });
   return {
     cognito,
+    github,
     logs,
     audit,
     handler,

@@ -85,12 +85,16 @@ run "full_stack" {
 
   assert {
     condition = jsondecode(aws_ssm_parameter.config.value) == {
-      userPoolId        = "eu-central-1_TESTPOOL"
-      clientId          = "testclientid123"
-      cognitoDomain     = "quizzer-x7k2.auth.us-east-1.amazoncognito.com"
-      region            = "us-east-1"
-      appHosts          = ["d111111abcdef8.cloudfront.net"]
-      datasets          = ["aws-dva-c02", "mule-mcd-01"]
+      userPoolId    = "eu-central-1_TESTPOOL"
+      clientId      = "testclientid123"
+      cognitoDomain = "quizzer-x7k2.auth.us-east-1.amazoncognito.com"
+      region        = "us-east-1"
+      appHosts      = ["d111111abcdef8.cloudfront.net"]
+      datasets      = ["aws-dva-c02", "mule-mcd-01"]
+      datasetRepos = {
+        aws-dva-c02 = { repo = "RedLicorice/quizzer-dataset-aws-dva-c02", file = "questions.json" }
+        mule-mcd-01 = { repo = "RedLicorice/quizzer-dataset-mule-mcd-01", file = "questions.json" }
+      }
       sessionTtlSeconds = 1800
       refreshCookieDays = 30
     }
