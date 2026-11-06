@@ -274,11 +274,9 @@ describe('dataset editor', () => {
   it('maps a GitHub failure to 502', async () => {
     const t = setup();
     const sha = seed(t);
-    const original = t.github.putFile.bind(t.github);
-    t.github.putFile = async () => { throw new GithubError(500); };
+    t.github.commitFiles = async () => { throw new GithubError(500); };
     const r = await t.handler(ev('PUT', url(), { ...ctx(admin()), body: JSON.stringify({ baseSha: sha, question: q1 }) }));
     expect(r.statusCode).toBe(502);
-    t.github.putFile = original;
   });
 
   const put = (t: ReturnType<typeof setup>, sha: string, question: unknown, qid = 1) =>
@@ -328,7 +326,7 @@ describe('dataset editor', () => {
       ]);
     });
 
-    it('drops an image path the question does not already use, and extra fields', async () => {
+    it('drops an image path the question does not already use (never an arbitrary URL), and extra fields', async () => {
       const t = setup();
       const sha = seedImages(t);
       const edited = {
@@ -345,8 +343,8 @@ describe('dataset editor', () => {
       expect((await put(t, sha, edited)).statusCode).toBe(200);
       const q = stored(t)[0]!;
       expect(q.options).toEqual([{ text: 'A', correct: true }, { text: 'B', correct: false }]);
-      expect(q.image).toBe('images/q001.jpeg');
-      expect(q.explanationImage).toBe('images/q001_expl.jpeg');
+      expect(q).not.toHaveProperty('image');
+      expect(q).not.toHaveProperty('explanationImage');
       expect(q).not.toHaveProperty('injected');
     });
 
@@ -357,6 +355,153 @@ describe('dataset editor', () => {
       const r = await put(t, sha, edited);
       expect(r.statusCode).toBe(400);
       expect(JSON.parse(r.body!).reason).toBe('option_text');
+    });
+  });
+
+  describe('image create / replace / delete', () => {
+    const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png-body')]);
+    const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('jpg-body')]);
+    const up = (token: string, bytes: Buffer) => ({ token, data: bytes.toString('base64') });
+    const base = {
+      id: 1,
+      text: 'Pick',
+      image: 'images/q001.jpeg',
+      options: [{ text: 'A', correct: true, image: 'images/q001_A.jpeg' }, { text: 'B', correct: false }],
+      selectCount: 1,
+      explanationImage: 'images/q001_expl.jpeg',
+    };
+    const index = (images: number) => JSON.stringify({ schemaVersion: 1, datasets: [{ id: 'aws-dva-c02', file: 'questions.json', questions: 2, images }] }, null, 2) + '\n';
+    const seedAll = (t: ReturnType<typeof setup>, other: unknown = q2) => {
+      const sha = t.github.seed(repo, file, JSON.stringify([base, other], null, 2) + '\n');
+      t.github.seed(repo, 'index.json', index(3));
+      for (const p of ['images/q001.jpeg', 'images/q001_A.jpeg', 'images/q001_expl.jpeg']) t.github.seedBlob(repo, p, Buffer.from('old'));
+      return sha;
+    };
+    const putU = (t: ReturnType<typeof setup>, sha: string, question: unknown, uploads?: unknown) =>
+      t.handler(ev('PUT', url(), { ...ctx(admin()), body: JSON.stringify({ baseSha: sha, question, uploads }) }));
+    const indexImages = (t: ReturnType<typeof setup>) => JSON.parse(t.github.files.get(`${repo}/index.json`)!.content).datasets[0].images;
+
+    it('adds an image to an option: server names it, commits the bytes once with questions.json and index.json', async () => {
+      const t = setup();
+      const sha = seedAll(t);
+      const edited = { ...base, options: [base.options[0], { text: 'B', correct: false, image: 'upload:u1' }] };
+      const r = await putU(t, sha, edited, [up('u1', PNG)]);
+      expect(r.statusCode).toBe(200);
+      const out = JSON.parse(r.body!);
+      const path = out.uploads.u1 as string;
+      expect(path).toMatch(/^images\/q001_B-[0-9a-f]{8}\.png$/);
+      expect(out.question.options[1].image).toBe(path);
+      expect(stored(t)[0]!.options).toEqual([base.options[0], { text: 'B', correct: false, image: path }]);
+      expect(t.github.blobs.get(`${repo}/${path}`)).toEqual(PNG);
+      expect(indexImages(t)).toBe(4);
+      expect(t.github.commits).toHaveLength(1);
+      expect(t.github.commits[0]!.paths.sort()).toEqual(['index.json', path, 'questions.json'].sort());
+      expect(t.github.commits[0]!.message).toContain('+1 image(s)');
+    });
+
+    it('replaces the question image: the old file is deleted and the index count stays', async () => {
+      const t = setup();
+      const sha = seedAll(t);
+      const r = await putU(t, sha, { ...base, image: 'upload:u1' }, [up('u1', JPG)]);
+      expect(r.statusCode).toBe(200);
+      const path = JSON.parse(r.body!).uploads.u1 as string;
+      expect(path).toMatch(/^images\/q001-[0-9a-f]{8}\.jpeg$/);
+      expect(stored(t)[0]!.image).toBe(path);
+      expect(t.github.blobs.has(`${repo}/images/q001.jpeg`)).toBe(false);
+      expect(t.github.commits[0]!.deleted).toEqual(['images/q001.jpeg']);
+      expect(indexImages(t)).toBe(3);
+      expect(t.github.commits[0]!.paths).not.toContain('index.json');
+    });
+
+    it('removes an image: the reference and the file go, the index count drops', async () => {
+      const t = setup();
+      const sha = seedAll(t);
+      const { explanationImage: _drop, ...noExpl } = base;
+      const r = await putU(t, sha, noExpl);
+      expect(r.statusCode).toBe(200);
+      expect(stored(t)[0]).not.toHaveProperty('explanationImage');
+      expect(t.github.blobs.has(`${repo}/images/q001_expl.jpeg`)).toBe(false);
+      expect(indexImages(t)).toBe(2);
+    });
+
+    it('adds an explanation image and a question image to a question that had none', async () => {
+      const t = setup();
+      const sha = seedAll(t);
+      const r = await t.handler(ev('PUT', url(2), {
+        ...ctx(admin()),
+        body: JSON.stringify({ baseSha: sha, question: { ...q2, image: 'upload:u1', explanationImage: 'upload:u2' }, uploads: [up('u1', PNG), up('u2', JPG)] }),
+      }));
+      expect(r.statusCode).toBe(200);
+      const out = JSON.parse(r.body!);
+      expect(out.question.image).toMatch(/^images\/q002-/);
+      expect(out.question.explanationImage).toMatch(/^images\/q002_expl-/);
+      expect(indexImages(t)).toBe(5);
+    });
+
+    it('does not delete an image another question still uses', async () => {
+      const t = setup();
+      const shared = { ...q2, image: 'images/q001.jpeg' };
+      const sha = seedAll(t, shared);
+      const { image: _drop, ...noImage } = base;
+      expect((await putU(t, sha, noImage)).statusCode).toBe(200);
+      expect(t.github.blobs.has(`${repo}/images/q001.jpeg`)).toBe(true);
+      expect(t.github.commits[0]!.deleted).toEqual([]);
+      expect(indexImages(t)).toBe(3);
+    });
+
+    it('re-using a stored path is kept as is (an unchanged image is not re-uploaded)', async () => {
+      const t = setup();
+      const sha = seedAll(t);
+      expect((await putU(t, sha, { ...base, text: 'Pick again' })).statusCode).toBe(200);
+      expect(stored(t)[0]!.image).toBe('images/q001.jpeg');
+      expect(t.github.commits[0]!.paths).toEqual(['questions.json']);
+    });
+
+    it('ignores an unused upload and an unknown token', async () => {
+      const t = setup();
+      const sha = seedAll(t);
+      const r = await putU(t, sha, { ...base, options: [base.options[0], { text: 'B', correct: false, image: 'upload:u9' }] }, [up('u1', PNG)]);
+      expect(r.statusCode).toBe(200);
+      expect(JSON.parse(r.body!).uploads).toEqual({});
+      expect(t.github.commits[0]!.paths).toEqual(['questions.json']);
+    });
+
+    it('works without an index.json (nothing to update)', async () => {
+      const t = setup();
+      const sha = t.github.seed(repo, file, JSON.stringify([base, q2]));
+      const r = await putU(t, sha, { ...base, image: 'upload:u1' }, [up('u1', PNG)]);
+      expect(r.statusCode).toBe(200);
+      expect(t.github.commits[0]!.paths.some((p) => p === 'index.json')).toBe(false);
+    });
+
+    const bad: Array<[string, unknown, string]> = [
+      ['not an image (bad magic)', [up('u1', Buffer.from('<svg onload=alert(1)>'))], 'image_invalid'],
+      ['empty', [{ token: 'u1', data: '' }], 'image_invalid'],
+      ['not base64', [{ token: 'u1', data: 'not base64!!' }], 'image_invalid'],
+      ['over 2 MiB', [up('u1', Buffer.concat([PNG, Buffer.alloc(2 * 1024 * 1024)]))], 'image_too_large'],
+      ['over the total', [up('u1', Buffer.concat([PNG, Buffer.alloc(1_900_000)])), up('u2', Buffer.concat([PNG, Buffer.alloc(1_900_000)]))], 'image_too_large'],
+      ['bad token', [{ token: '../x', data: PNG.toString('base64') }], 'uploads'],
+      ['duplicate token', [up('u1', PNG), up('u1', PNG)], 'uploads'],
+      ['uploads not an array', 'x', 'uploads'],
+      ['too many', Array.from({ length: 13 }, (_, i) => up(`u${i}`, PNG)), 'uploads'],
+    ];
+    it.each(bad)('rejects an upload that is %s', async (_n, uploads, reason) => {
+      const t = setup();
+      const sha = seedAll(t);
+      const r = await putU(t, sha, { ...base, image: 'upload:u1' }, uploads);
+      expect(r.statusCode).toBe(400);
+      expect(JSON.parse(r.body!).reason).toBe(reason);
+      expect(t.github.commits).toHaveLength(0);
+    });
+
+    it('same bytes twice give the same name (a retried save is idempotent)', async () => {
+      const t = setup();
+      const sha = seedAll(t);
+      const a = JSON.parse((await putU(t, sha, { ...base, image: 'upload:u1' }, [up('u1', PNG)])).body!).uploads.u1;
+      const t2 = setup();
+      const sha2 = seedAll(t2);
+      const b = JSON.parse((await putU(t2, sha2, { ...base, image: 'upload:u1' }, [up('u1', PNG)])).body!).uploads.u1;
+      expect(a).toBe(b);
     });
   });
 
@@ -414,8 +559,9 @@ describe('dataset editor', () => {
       const t = setup();
       const sha = seed(t);
       const r = await put(t, sha, { ...q1, explanation: 'x'.repeat(70_000) });
-      expect(r.statusCode).toBe(400);
-      expect(JSON.parse(r.body!).error).toBe('bad_json');
+      expect(r.statusCode).toBe(413);
+      expect(JSON.parse(r.body!).error).toBe('too_large');
+      expect(t.github.commits).toHaveLength(0);
     });
 
     it('PUT needs the CSRF header and a same-origin request', async () => {

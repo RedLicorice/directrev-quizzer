@@ -159,7 +159,7 @@ export async function loadIndex(src: SourceConfig): Promise<DatasetEntry[]> {
 
 const ABSOLUTE = /^(data:|https?:|blob:|\/\/)/i;
 
-function resolveImage(src: SourceConfig, baseDir: string, value: string | undefined): string | undefined {
+export function resolveImage(src: SourceConfig, baseDir: string, value: string | undefined): string | undefined {
   if (!value) return undefined;
   if (ABSOLUTE.test(value) || value.startsWith(PRIVATE_PREFIX)) return value;
   return imageSrc(src, joinPath(baseDir, value));

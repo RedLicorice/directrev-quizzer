@@ -232,7 +232,7 @@ con le ultime azioni. La logica sta nella Lambda `admin` dietro `/api/admin/*`; 
 - **Modifica domande (P1)**: nella tab Dataset (build AWS, admin) la matita apre l'editor Markdown —
   testo, opzioni, "corretta", spiegazione, `sourceNumber` — con anteprima. Salva **un commit nel repo
   del dataset**; il workflow `publish` aggiorna S3/CloudFront in 1–2 min. `baseSha` impedisce
-  sovrascritture silenziose; l'`id` interno non cambia mai; le immagini restano quelle già nel repo.
+  sovrascritture silenziose; l'`id` interno non cambia mai. Le immagini (domanda, opzioni, spiegazione) si vedono nell'editor e si aggiungono, sostituiscono e rimuovono da lì: PNG/JPEG/GIF/WebP, ≤ 2 MB ciascuna (quelle grandi vengono ridotte dal browser), nello stesso commit di `questions.json` (e del conteggio `images` in `index.json`).
   Lo stile del file (indentazione, a-capo, BOM) è mantenuto, quindi il diff è di una sola domanda.
   Dopo il salvataggio la modifica è subito visibile in app (il publish arriva dopo 1–2 min).
   Niente DynamoDB: il repo resta la fonte di verità.

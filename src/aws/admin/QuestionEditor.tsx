@@ -1,8 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X, Save, Plus, Trash2, RefreshCw, AlertTriangle } from 'lucide-react';
 import type { Question, Option } from '../../types';
 import { getDatasetQuestion, saveDatasetQuestion, errorText, AdminApiError } from './adminApi';
+import type { ImageUpload } from './adminApi';
 import MarkdownEditor from './MarkdownEditor';
+import ImageField from './ImageField';
+import { prepareImage, MAX_SAVE_BYTES } from './imageUpload';
+import type { PreparedImage } from './imageUpload';
+import { hostedSource, resolveImage } from '../../utils/datasets';
 
 interface Props {
   datasetId: string;
@@ -22,6 +27,9 @@ export default function QuestionEditor({ datasetId, question: initial, onClose, 
   const [conflict, setConflict] = useState(false);
   const [saved, setSaved] = useState(false);
   const [reformatted, setReformatted] = useState(false);
+  // New images picked in this editor, by token; the question refers to them as `upload:<token>`.
+  const [uploads, setUploads] = useState<Record<string, PreparedImage>>({});
+  const nextToken = useRef(0);
 
   async function load() {
     setLoading(true);
@@ -50,6 +58,24 @@ export default function QuestionEditor({ datasetId, question: initial, onClose, 
   function addOption() {
     setQuestion((q) => (q ? { ...q, options: [...q.options, { text: '', correct: false }] } : q));
   }
+  /** URL to show for an image value (a stored repo path, or a freshly picked file). */
+  function srcOf(value: string | undefined): string | null {
+    if (!value) return null;
+    if (value.startsWith('upload:')) return uploads[value.slice('upload:'.length)]?.preview ?? null;
+    return resolveImage(hostedSource(), datasetId, value) ?? null;
+  }
+  /** Reads, checks and (if big) shrinks a picked file, then hands its `upload:` reference to `apply`. */
+  async function pickImage(file: File, apply: (ref: string) => void) {
+    setError(null);
+    try {
+      const img = await prepareImage(file);
+      const token = `u${++nextToken.current}`;
+      setUploads((u) => ({ ...u, [token]: img }));
+      apply(`upload:${token}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
   function removeOption(i: number) {
     setQuestion((q) => (q && q.options.length > 2 ? { ...q, options: q.options.filter((_, j) => j !== i) } : q));
   }
@@ -69,13 +95,32 @@ export default function QuestionEditor({ datasetId, question: initial, onClose, 
       sourceNumber: question.sourceNumber?.trim() ? question.sourceNumber.trim() : undefined,
       explanation: question.explanation?.trim() ? question.explanation : undefined,
     };
+    const used = new Set<string>();
+    for (const v of [next.image, next.explanationImage, ...options.map((o) => o.image)]) {
+      if (v?.startsWith('upload:')) used.add(v.slice('upload:'.length));
+    }
+    const payload: ImageUpload[] = [...used].flatMap((t) => (uploads[t] ? [{ token: t, data: uploads[t].data }] : []));
+    if (payload.reduce((n, u) => n + uploads[u.token].bytes, 0) > MAX_SAVE_BYTES) {
+      return setError('Troppe immagini nuove in un solo salvataggio (massimo circa 3,5 MB): salva a gruppi.');
+    }
     setBusy(true);
     setError(null);
     try {
-      const out = await saveDatasetQuestion(datasetId, next.id, sha, next);
+      const out = await saveDatasetQuestion(datasetId, next.id, sha, next, payload);
       setReformatted(out.reformatted === true);
       setSaved(true);
-      onSaved(next);
+      // Show new pictures straight away: the published copy (S3) lags the commit by 1–2 minutes.
+      const local = (p: string | undefined): string | undefined => {
+        const token = Object.keys(out.uploads).find((t) => out.uploads[t] === p);
+        return token && uploads[token] ? uploads[token].preview : p;
+      };
+      const q = out.question;
+      onSaved({
+        ...q,
+        image: local(q.image),
+        explanationImage: local(q.explanationImage),
+        options: q.options.map((o) => (o.image ? { ...o, image: local(o.image) } : o)),
+      });
     } catch (e) {
       if (e instanceof AdminApiError && e.code === 'conflict') setConflict(true);
       setError(errorText(e));
@@ -154,6 +199,16 @@ export default function QuestionEditor({ datasetId, question: initial, onClose, 
               <div>
                 <label className={rw}>Testo domanda (Markdown)</label>
                 <MarkdownEditor value={question.text} onChange={(text) => patch({ text })} rows={4} placeholder="Testo della domanda…" />
+                <div className="mt-2">
+                  <ImageField
+                    label="Immagine della domanda"
+                    value={question.image}
+                    src={srcOf(question.image)}
+                    busy={busy}
+                    onPick={(f) => void pickImage(f, (ref) => patch({ image: ref }))}
+                    onRemove={() => patch({ image: undefined })}
+                  />
+                </div>
               </div>
 
               <div>
@@ -179,7 +234,6 @@ export default function QuestionEditor({ datasetId, question: initial, onClose, 
                           />
                           corretta
                         </label>
-                        {o.image && <span className="font-mono text-[11px] text-slate-500 truncate">img: {o.image}</span>}
                         <div className="flex-1" />
                         <button
                           onClick={() => removeOption(i)}
@@ -191,6 +245,14 @@ export default function QuestionEditor({ datasetId, question: initial, onClose, 
                         </button>
                       </div>
                       <MarkdownEditor value={o.text} onChange={(text) => patchOption(i, { text })} rows={2} placeholder={`Testo opzione ${String.fromCharCode(65 + i)}…`} />
+                      <ImageField
+                        label={`Immagine opzione ${String.fromCharCode(65 + i)}`}
+                        value={o.image}
+                        src={srcOf(o.image)}
+                        busy={busy}
+                        onPick={(f) => void pickImage(f, (ref) => patchOption(i, { image: ref }))}
+                        onRemove={() => patchOption(i, { image: undefined })}
+                      />
                     </div>
                   ))}
                 </div>
@@ -204,13 +266,20 @@ export default function QuestionEditor({ datasetId, question: initial, onClose, 
                   rows={5}
                   placeholder="Spiegazione della risposta corretta…"
                 />
-                {question.explanationImage && (
-                  <p className="mt-1 font-mono text-[11px] text-slate-500">immagine spiegazione: {question.explanationImage}</p>
-                )}
+                <div className="mt-2">
+                  <ImageField
+                    label="Immagine della spiegazione"
+                    value={question.explanationImage}
+                    src={srcOf(question.explanationImage)}
+                    busy={busy}
+                    onPick={(f) => void pickImage(f, (ref) => patch({ explanationImage: ref }))}
+                    onRemove={() => patch({ explanationImage: undefined })}
+                  />
+                </div>
               </div>
 
               <p className="text-xs text-slate-600">
-                Le immagini e i percorsi restano invariati da qui. selectCount viene impostato automaticamente al numero di risposte corrette.
+                Le immagini si aggiungono, sostituiscono e rimuovono qui (PNG, JPEG, GIF, WebP; quelle grandi vengono ridotte sotto 2 MB). Le immagini non più usate vengono cancellate dal repo. selectCount viene impostato automaticamente al numero di risposte corrette.
               </p>
             </>
           )}

@@ -4,7 +4,7 @@ import { createHmac } from 'node:crypto';
 import { signSession } from '../../../edge/session-core.js';
 import { createKeyStore } from '../../auth/src/keys.js';
 import type { Config } from '../../auth/src/config.js';
-import { GithubError, type GithubClient } from '../src/github.js';
+import { GithubError, type CommitInput, type GithubClient } from '../src/github.js';
 import {
   createHandler,
   type AdminUser,
@@ -106,8 +106,11 @@ export class FakeCognito implements CognitoAdmin {
 }
 
 export class FakeGithub implements GithubClient {
+  /** Text files. */
   files = new Map<string, { content: string; sha: string }>();
-  commits: { repo: string; path: string; content: string; message: string }[] = [];
+  /** Binary files (images), keyed like `files`. */
+  blobs = new Map<string, Buffer>();
+  commits: { repo: string; message: string; paths: string[]; deleted: string[] }[] = [];
   private seq = 0;
   private key(repo: string, path: string) {
     return `${repo}/${path}`;
@@ -117,16 +120,34 @@ export class FakeGithub implements GithubClient {
     this.files.set(this.key(repo, path), { content, sha });
     return sha;
   }
+  seedBlob(repo: string, path: string, bytes: Buffer) {
+    this.blobs.set(this.key(repo, path), bytes);
+  }
   async getFile(repo: string, path: string) {
     return this.files.get(this.key(repo, path)) ?? null;
   }
-  async putFile(repo: string, path: string, content: string, sha: string, message: string) {
-    const f = this.files.get(this.key(repo, path));
-    if (!f || f.sha !== sha) throw new GithubError(409);
-    const next = `sha-${++this.seq}`;
-    this.files.set(this.key(repo, path), { content, sha: next });
-    this.commits.push({ repo, path, content, message });
-    return { sha: next, commit: `commit-${this.seq}` };
+  async commitFiles(repo: string, input: CommitInput) {
+    const cur = this.files.get(this.key(repo, input.expect.path));
+    if (!cur || cur.sha !== input.expect.sha) throw new GithubError(409);
+    const paths: string[] = [];
+    const deleted: string[] = [];
+    let sha = cur.sha;
+    for (const f of input.files) {
+      const k = this.key(repo, f.path);
+      if (f.delete) {
+        if (this.blobs.delete(k) || this.files.delete(k)) deleted.push(f.path);
+      } else if (f.bytes) {
+        if (!this.blobs.has(k)) this.blobs.set(k, f.bytes);
+        paths.push(f.path);
+      } else {
+        const next = `sha-${++this.seq}`;
+        this.files.set(k, { content: f.text ?? '', sha: next });
+        if (f.path === input.expect.path) sha = next;
+        paths.push(f.path);
+      }
+    }
+    this.commits.push({ repo, message: input.message, paths, deleted });
+    return { sha, commit: `commit-${++this.seq}` };
   }
 }
 

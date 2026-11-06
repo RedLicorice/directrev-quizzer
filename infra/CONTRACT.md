@@ -195,7 +195,7 @@ The path identifies a user by `base64url(username)`: the Cognito username is the
 ### `/api/admin/datasets/*` (dataset editor, P1)
 
 Admin-only (same three authorization layers and CSRF rules as §5.1). The dataset repo stays the
-source of truth: the Lambda reads/commits `questions.json` through the GitHub Contents API with a
+source of truth: the Lambda reads `questions.json` through the GitHub Contents API and writes through the Git Data API (one edit = ONE commit, see below) with a
 fine-grained token stored as the SSM SecureString `/quizzer/<environment>/github-datasets-token` (never sent
 to the browser). The commit triggers the dataset repo's validate + publish workflow, so S3 and
 CloudFront update in about 1–2 minutes. No DynamoDB.
@@ -204,16 +204,27 @@ CloudFront update in about 1–2 minutes. No DynamoDB.
 |---|---|---|---|
 | `GET /api/admin/datasets` | | 200 `{datasets:[{id,repo}]}` — editable datasets | 401/403 |
 | `GET /api/admin/datasets/<ds>/questions/<qid>` | | 200 `{sha, question}` (repo copy) | 404 `dataset_not_editable`/`not_found`; 502 `github_error` |
-| `PUT /api/admin/datasets/<ds>/questions/<qid>` | `{baseSha, question}` (body ≤ 64 KiB) | 200 `{sha, commit, reformatted}` | 400 `invalid_question` (+`reason`) or `bad_json`; 409 `conflict` when `baseSha` is stale; 429; 502 `github_error` |
+| `PUT /api/admin/datasets/<ds>/questions/<qid>` | `{baseSha, question, uploads?: [{token, data}]}` (question ≤ 64 KiB, whole body ≤ ~5 MB) | 200 `{sha, commit, reformatted, question, uploads}` (`question` = as committed; `uploads` = token → repo path) | 400 `invalid_question` (+`reason`, e.g. `image_invalid`, `image_too_large`) or `bad_json`; 409 `conflict` when `baseSha` is stale or the branch moved; 413 `too_large`; 429; 502 `github_error` |
 
 - `datasetRepos` in the SSM config maps each id to `{repo: "owner/name", file: "questions.json"}`.
 - The internal `id` can never change (stats/notes/history are keyed on it); `selectCount` must
   equal the number of `correct: true` options; `sourceNumber` is a free string (≤ 40 chars, the
   number in the source document when it differs from `id`).
-- Only `text`, `selectCount`, `explanation`, `sourceNumber` and, per option, `text` + `correct`
-  are taken from the client. Everything else (question `image`, `explanationImage`, unknown
-  fields) comes from the stored question; an option `image` is kept only if the stored question
-  already uses that exact path (so options can be removed or edited, never pointed at a new image).
+- Only `text`, `selectCount`, `explanation`, `sourceNumber` and, per option, `text` + `correct` + an
+  image are taken from the client (unknown fields are dropped).
+- **Images (create / replace / delete).** The question `image`, each option `image` and
+  `explanationImage` are set by the client as one of: a path the stored question already uses (kept),
+  `upload:<token>` (a new file sent in `uploads` as base64), or absent (removed). Anything else (URLs,
+  `..`, paths of other questions) is dropped, so an image can never point outside the repo. Uploads are
+  accepted only if the *bytes* are PNG, JPEG, GIF or WebP (SVG is refused), ≤ 2 MiB each, ≤ 3.5 MiB and
+  ≤ 12 files per request. The server names each file `images/q<id>[_<slot>]-<sha256:8>.<ext>`
+  (content-addressed: a retry writes the same name). An image the edit stopped using is deleted from
+  the repo unless another question still references it.
+- **One commit.** `questions.json`, new images, deleted images and — when the number of distinct
+  referenced images changes — `images` in `index.json` (the dataset validator rejects a stale count, which
+  would fail the publish) go into a single commit (blobs → tree → commit → fast-forward-only ref update).
+  The commit is refused with 409 if `questions.json` at the branch head is no longer `baseSha` or the
+  branch moved meanwhile.
 - Only the edited question is validated; other questions of the file are copied untouched.
 - The file is rewritten in its original style (compact or indented with 2/4 spaces/tabs, CRLF,
   trailing newline, BOM) so the commit is a one-question diff. If the style cannot be reproduced

@@ -27,7 +27,7 @@ export interface AuditEntry {
 }
 
 export class AdminApiError extends Error {
-  constructor(readonly status: number, readonly code: string) {
+  constructor(readonly status: number, readonly code: string, readonly reason?: string) {
     super(code);
     this.name = 'AdminApiError';
   }
@@ -40,13 +40,15 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   const res = await apiFetch(url, { ...init, headers });
   if (!res.ok) {
     let code = String(res.status);
+    let reason: string | undefined;
     try {
-      const body = (await res.json()) as { error?: unknown };
+      const body = (await res.json()) as { error?: unknown; reason?: unknown };
       if (body && typeof body.error === 'string') code = body.error;
+      if (body && typeof body.reason === 'string') reason = body.reason;
     } catch {
       /* not JSON */
     }
-    throw new AdminApiError(res.status, code);
+    throw new AdminApiError(res.status, code, reason);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -89,9 +91,32 @@ export interface DatasetQuestionFile {
 export const getDatasetQuestion = (datasetId: string, qid: number) =>
   request<DatasetQuestionFile>(`/api/admin/datasets/${datasetId}/questions/${qid}`);
 
-/** Commits one question to the dataset repo (the publish workflow updates S3). */
-export const saveDatasetQuestion = (datasetId: string, qid: number, baseSha: string, question: import('../../types').Question) =>
-  mutate<{ sha: string; commit: string; reformatted?: boolean }>(`/api/admin/datasets/${datasetId}/questions/${qid}`, 'PUT', { baseSha, question });
+/** A new image sent with a save; the question references it as `upload:<token>`. */
+export interface ImageUpload { token: string; data: string /* base64 */ }
+
+export interface SavedQuestion {
+  sha: string;
+  commit: string;
+  reformatted?: boolean;
+  /** The question as committed (image paths are the ones the server assigned). */
+  question: import('../../types').Question;
+  /** upload token -> repo path the server gave the new image. */
+  uploads: Record<string, string>;
+}
+
+/** Commits one question (and its new/removed images) to the dataset repo; the publish workflow updates S3. */
+export const saveDatasetQuestion = (
+  datasetId: string,
+  qid: number,
+  baseSha: string,
+  question: import('../../types').Question,
+  uploads: ImageUpload[] = [],
+) =>
+  mutate<SavedQuestion>(`/api/admin/datasets/${datasetId}/questions/${qid}`, 'PUT', {
+    baseSha,
+    question,
+    ...(uploads.length ? { uploads } : {}),
+  });
 
 // Human-readable message for an AdminApiError code.
 export function errorText(e: unknown): string {
@@ -108,7 +133,12 @@ export function errorText(e: unknown): string {
       case 'not_found': return 'Utente non trovato.';
       case 'dataset_not_editable': return 'Questo dataset non è modificabile da qui (serve un repo GitHub configurato).';
       case 'conflict': return 'Il dataset è cambiato nel frattempo: ricarica la domanda e riapplica le modifiche.';
-      case 'invalid_question': return 'La domanda non è valida: controlla testo, opzioni, risposta corretta e selectCount.';
+      case 'too_large': return 'La domanda è troppo grande.';
+      case 'invalid_question':
+        if (e.reason === 'image_too_large') return 'Immagini troppo grandi: massimo 2 MB ciascuna e circa 3,5 MB in totale per salvataggio.';
+        if (e.reason === 'image_invalid') return 'Immagine non valida: sono accettati solo PNG, JPEG, GIF e WebP.';
+        if (e.reason === 'uploads') return 'Caricamento immagini non valido (troppe immagini in un solo salvataggio?).';
+        return 'La domanda non è valida: controlla testo, opzioni, risposta corretta e selectCount.';
       case 'github_error': return 'GitHub non ha accettato la modifica (token mancante/scaduto o permessi insufficienti).';
       default: return `Errore ${e.status} (${e.code}).`;
     }

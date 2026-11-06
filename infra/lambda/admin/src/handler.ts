@@ -16,7 +16,8 @@ import type { SessionClaims } from '../../../edge/session-core.js';
 import type { Config } from '../../auth/src/config.js';
 import type { KeyStore } from '../../auth/src/keys.js';
 import { getCookie } from '../../auth/src/cookies.js';
-import { GithubError, type GithubClient } from './github.js';
+import { GithubError, type CommitFile, type GithubClient } from './github.js';
+import { IMAGE_PATH_RE, decodeUploads, imageName } from './images.js';
 import { detectJsonStyle, parseJsonText } from './jsonStyle.js';
 
 export interface UrlEvent {
@@ -93,7 +94,9 @@ const UID_RE = /^[A-Za-z0-9_-]{2,342}$/;
 const ADMIN_GROUP_TTL_MS = 60_000;
 const MAX_BODY = 8192;
 // One edited question (long markdown explanation, many options) is far bigger than a user action.
-const MAX_EDIT_BODY = 65_536;
+const MAX_EDIT_QUESTION = 65_536;
+// Up to MAX_UPLOAD_TOTAL_BYTES of images as base64 (x4/3) plus the question: under the 6 MB Function URL cap.
+const MAX_EDIT_BODY = 5_200_000;
 
 const MUTATIONS_PER_HOUR = 30;
 const INVITES_PER_DAY = 20;
@@ -203,30 +206,48 @@ function validateQuestion(value: unknown): string | null {
   return null;
 }
 
-/**
- * Options come from the client but only `text` and `correct` are taken from it. An `image` is
- * kept only when the stored question already uses that exact path, so the editor can never
- * point an option at an arbitrary URL (images are not editable here).
- */
-function rebuildOptions(incoming: unknown, stored: unknown): Array<Record<string, unknown>> | string {
-  if (!Array.isArray(incoming) || incoming.length < 2) return 'options';
-  const knownImages = new Set<string>();
-  if (Array.isArray(stored)) {
-    for (const o of stored) {
+/** Every image path a stored question references (question, options, explanation). */
+function imagesOf(q: unknown): string[] {
+  if (!q || typeof q !== 'object') return [];
+  const r = q as { image?: unknown; explanationImage?: unknown; options?: unknown };
+  const out: string[] = [];
+  if (typeof r.image === 'string') out.push(r.image);
+  if (typeof r.explanationImage === 'string') out.push(r.explanationImage);
+  if (Array.isArray(r.options)) {
+    for (const o of r.options) {
       const img = o && typeof o === 'object' ? (o as { image?: unknown }).image : undefined;
-      if (typeof img === 'string') knownImages.add(img);
+      if (typeof img === 'string') out.push(img);
     }
   }
+  return out;
+}
+
+/** Resolves an image reference sent by the client: a stored path, an `upload:<token>`, or nothing. */
+type PickImage = (value: unknown, slot: string) => string | undefined;
+
+/**
+ * Options come from the client but only `text`, `correct` and an image are taken from it. The
+ * image must be a path the stored question already uses or a file uploaded in this request
+ * (the server names it), so the editor can never point an option at an arbitrary URL.
+ */
+function rebuildOptions(incoming: unknown, pick: PickImage): Array<Record<string, unknown>> | string {
+  if (!Array.isArray(incoming) || incoming.length < 2) return 'options';
   const out: Array<Record<string, unknown>> = [];
-  for (const raw of incoming) {
+  for (let i = 0; i < incoming.length; i++) {
+    const raw = incoming[i];
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 'option_shape';
     const o = raw as Record<string, unknown>;
     const next: Record<string, unknown> = { text: o.text, correct: o.correct };
-    if (typeof o.image === 'string' && knownImages.has(o.image)) next.image = o.image;
+    const img = pick(o.image, String.fromCharCode(65 + (i % 26)));
+    if (img !== undefined) next.image = img;
     out.push(next);
   }
   return out;
 }
+
+/** Directory part of a repo path ('' for the root). */
+const dirOfPath = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+const joinRepo = (dir: string, rel: string) => (dir ? `${dir}/${rel}` : rel);
 
 export function createHandler(deps: Deps) {
   // Live `admin` group cache: a removed admin loses access within 60 s even if the
@@ -442,18 +463,46 @@ export function createHandler(deps: Deps) {
         if (typeof body.baseSha !== 'string' || body.baseSha !== file.sha) return json(409, { error: 'conflict' });
         const incoming = body.question;
         if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return json(400, { error: 'invalid_question' });
+        if (JSON.stringify(incoming).length > MAX_EDIT_QUESTION) return json(413, { error: 'too_large' });
         const q = incoming as Record<string, unknown>;
         if (q.id !== qid) return json(400, { error: 'invalid_question', reason: 'id_changed' });
 
-        // Replace in place: keep the array order, the internal id and every image path of the
-        // stored question; only the editable fields come from the client.
+        const uploads = decodeUploads(body.uploads);
+        if (typeof uploads === 'string') return json(400, { error: 'invalid_question', reason: uploads });
+
+        // Replace in place: keep the array order and the internal id; only the editable fields
+        // (and images, see PickImage) come from the client.
         const idx = questions.indexOf(found);
         const original = found as Record<string, unknown>;
-        const options = rebuildOptions(q.options, original.options);
+        const storedImages = new Set(imagesOf(original));
+        const dir = dirOfPath(repoCfg.file);
+        const newFiles = new Map<string, Buffer>(); // question-relative path -> bytes
+        const tokenPath: Record<string, string> = {};
+        const pick: PickImage = (value, slot) => {
+          if (typeof value !== 'string') return undefined;
+          if (storedImages.has(value)) return value;
+          if (value.startsWith('upload:')) {
+            const token = value.slice('upload:'.length);
+            const up = uploads.get(token);
+            if (!up) return undefined;
+            const path = imageName(qid, slot, up.bytes, up.ext);
+            newFiles.set(path, up.bytes);
+            tokenPath[token] = path;
+            return path;
+          }
+          return undefined;
+        };
+
+        const options = rebuildOptions(q.options, pick);
         if (typeof options === 'string') return json(400, { error: 'invalid_question', reason: options });
         const merged: Record<string, unknown> = { ...original };
         for (const k of ['text', 'selectCount', 'explanation', 'sourceNumber']) {
           if (Object.prototype.hasOwnProperty.call(q, k)) merged[k] = q[k];
+          else delete merged[k];
+        }
+        for (const [k, slot] of [['image', ''], ['explanationImage', 'expl']] as const) {
+          const img = pick(q[k], slot);
+          if (img !== undefined) merged[k] = img;
           else delete merged[k];
         }
         merged.options = options;
@@ -465,18 +514,47 @@ export function createHandler(deps: Deps) {
         if (reason) return json(400, { error: 'invalid_question', reason });
         questions[idx] = merged;
 
-        const content = style.stringify(questions);
+        // Files of this commit: questions.json, new images, images this edit stopped using (and
+        // nobody else uses), and index.json when its distinct-image count changes (the dataset
+        // validator rejects a stale count, which would fail the publish).
+        const nowImages = new Set(imagesOf(merged));
+        const usedElsewhere = new Set<string>();
+        for (const other of questions) if (other !== merged) for (const p of imagesOf(other)) usedElsewhere.add(p);
+        const removed = [...storedImages].filter((p) => !nowImages.has(p) && !usedElsewhere.has(p) && IMAGE_PATH_RE.test(p));
+        const added = [...newFiles.keys()].filter((p) => !usedElsewhere.has(p));
+
+        const files: CommitFile[] = [{ path: repoCfg.file, text: style.stringify(questions) }];
+        for (const [p, bytes] of newFiles) files.push({ path: joinRepo(dir, p), bytes });
+        for (const p of removed) files.push({ path: joinRepo(dir, p), delete: true });
+
         try {
-          const out = await deps.github.putFile(
-            repoCfg.repo,
-            repoCfg.file,
-            content,
-            file.sha,
-            `fix(dataset): edit question ${qid}\n\nEdited via Quizzer admin by ${actor}.`,
-          );
-          audit('question_edit', `${datasetId}#${qid}`, undefined, style.exact ? undefined : 'file reformatted');
+          const indexPath = joinRepo(dir, 'index.json');
+          const index = await deps.github.getFile(repoCfg.repo, indexPath);
+          if (index) {
+            const total = new Set(questions.flatMap(imagesOf)).size;
+            const idxJson = ((): { datasets?: Array<Record<string, unknown>> } | null => {
+              try { return parseJsonText(index.content) as { datasets?: Array<Record<string, unknown>> }; } catch { return null; } // a broken index.json is left alone
+            })();
+            const entry = idxJson?.datasets?.[0];
+            if (idxJson && entry && entry.images !== total) {
+              const re = /("images"\s*:\s*)\d+/;
+              const text = re.test(index.content)
+                ? index.content.replace(re, `$1${total}`)
+                : JSON.stringify({ ...idxJson, datasets: [{ ...entry, images: total }, ...(idxJson.datasets ?? []).slice(1)] }, null, 2) + '\n';
+              files.push({ path: indexPath, text });
+            }
+          }
+
+          const note = [added.length ? `+${added.length} image(s)` : '', removed.length ? `-${removed.length} image(s)` : ''].filter(Boolean).join(', ');
+          const out = await deps.github.commitFiles(repoCfg.repo, {
+            files,
+            expect: { path: repoCfg.file, sha: file.sha },
+            message: `fix(dataset): edit question ${qid}${note ? ` (${note})` : ''}\n\nEdited via Quizzer admin by ${actor}.`,
+          });
+          const detail = [style.exact ? '' : 'file reformatted', note].filter(Boolean).join('; ');
+          audit('question_edit', `${datasetId}#${qid}`, undefined, detail || undefined);
           // reformatted: the original style could not be reproduced, so the diff is larger than one question.
-          return json(200, { sha: out.sha, commit: out.commit, reformatted: !style.exact });
+          return json(200, { sha: out.sha, commit: out.commit, reformatted: !style.exact, question: merged, uploads: tokenPath });
         } catch (e) {
           if (e instanceof GithubError && e.status === 409) return json(409, { error: 'conflict' });
           deps.log({ evt: 'github_error', ip, path, error: e instanceof Error ? e.message : String(e) });
