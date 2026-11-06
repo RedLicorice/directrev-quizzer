@@ -91,7 +91,7 @@ export const getDatasetQuestion = (datasetId: string, qid: number) =>
 
 /** Commits one question to the dataset repo (the publish workflow updates S3). */
 export const saveDatasetQuestion = (datasetId: string, qid: number, baseSha: string, question: import('../../types').Question) =>
-  mutate<{ sha: string; commit: string }>(`/api/admin/datasets/${datasetId}/questions/${qid}`, 'PUT', { baseSha, question });
+  mutate<{ sha: string; commit: string; reformatted?: boolean }>(`/api/admin/datasets/${datasetId}/questions/${qid}`, 'PUT', { baseSha, question });
 
 // Human-readable message for an AdminApiError code.
 export function errorText(e: unknown): string {

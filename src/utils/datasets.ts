@@ -165,17 +165,27 @@ function resolveImage(src: SourceConfig, baseDir: string, value: string | undefi
   return imageSrc(src, joinPath(baseDir, value));
 }
 
-export async function loadDataset(src: SourceConfig, entry: DatasetEntry): Promise<Question[]> {
-  const res = await fetchResource(src, sourcePath(src, entry.file));
-  const raw = (await res.json()) as Question[];
-  if (!Array.isArray(raw) || raw.length === 0 || !raw[0].text) throw new Error(`${entry.file}: not a valid questions array`);
-  const baseDir = dirOf(entry.file);
-  return raw.map((q) => ({
+/** Turns a question as stored in questions.json into one the app can render (image paths resolved). */
+export function resolveQuestion(src: SourceConfig, baseDir: string, q: Question): Question {
+  return {
     ...q,
     image: resolveImage(src, baseDir, q.image),
     explanationImage: resolveImage(src, baseDir, q.explanationImage),
     options: q.options.map((o) => (o.image ? { ...o, image: resolveImage(src, baseDir, o.image) } : o)),
-  }));
+  };
+}
+
+/** Directory (relative to the source) that the image paths of a dataset's questions.json are relative to. */
+export function datasetBaseDir(entry: DatasetEntry): string {
+  return dirOf(entry.file);
+}
+
+export async function loadDataset(src: SourceConfig, entry: DatasetEntry): Promise<Question[]> {
+  const res = await fetchResource(src, sourcePath(src, entry.file));
+  const raw = (await res.json()) as Question[];
+  if (!Array.isArray(raw) || raw.length === 0 || !raw[0].text) throw new Error(`${entry.file}: not a valid questions array`);
+  const baseDir = datasetBaseDir(entry);
+  return raw.map((q) => resolveQuestion(src, baseDir, q));
 }
 
 // ── private images ─────────────────────────────────────────────────────────

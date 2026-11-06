@@ -8,7 +8,8 @@ interface Props {
   onBack: () => void;
   onResetStat: (qId: number) => void;
   onResetAllStats: () => void;
-  /** AWS build + admin only: open the question editor. */
+  /** Hosted dataset an admin may edit (AWS build); the pencil shows only if the admin API lists it. */
+  editableDatasetId?: string;
   onEditQuestion?: (q: Question) => void;
 }
 
@@ -36,7 +37,7 @@ function RateBar({ rate }: { rate: number | null }) {
   );
 }
 
-export default function DatasetScreen({ questions, stats, onBack, onResetStat, onResetAllStats, onEditQuestion }: Props) {
+export default function DatasetScreen({ questions, stats, onBack, onResetStat, onResetAllStats, editableDatasetId, onEditQuestion }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('id');
   const [sortAsc, setSortAsc] = useState(true);
   const [filter, setFilter] = useState<Filter>('all');
@@ -45,15 +46,20 @@ export default function DatasetScreen({ questions, stats, onBack, onResetStat, o
   const [canEdit, setCanEdit] = useState(false);
   const PAGE_SIZE = 50;
 
-  // AWS build only: show the edit pencil only when the admin API accepts this session.
+  // AWS build only: show the edit pencil only when the admin API accepts this session AND lists
+  // the dataset on screen as editable (it has a repo configured).
   useEffect(() => {
-    if (!onEditQuestion || import.meta.env.VITE_DEPLOY !== 'aws') return;
+    setCanEdit(false);
+    if (!onEditQuestion || !editableDatasetId || import.meta.env.VITE_DEPLOY !== 'aws') return;
     let cancelled = false;
     fetch('/api/admin/datasets', { credentials: 'same-origin', headers: { accept: 'application/json' } })
-      .then((r) => { if (!cancelled && r.ok) setCanEdit(true); })
+      .then((r) => (r.ok ? (r.json() as Promise<{ datasets?: Array<{ id?: unknown }> }>) : null))
+      .then((body) => {
+        if (!cancelled && body?.datasets?.some((d) => d.id === editableDatasetId)) setCanEdit(true);
+      })
       .catch(() => { /* not an admin / offline */ });
     return () => { cancelled = true; };
-  }, [onEditQuestion]);
+  }, [onEditQuestion, editableDatasetId]);
 
   const totalAttempted = useMemo(() => Object.keys(stats).length, [stats]);
   const totalWeak = useMemo(

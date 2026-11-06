@@ -17,7 +17,8 @@ import SessionHistoryScreen from './components/SessionHistoryScreen';
 import SessionReviewScreen from './components/SessionReviewScreen';
 import DatasetScreen from './components/DatasetScreen';
 import { setActiveDataset, statsKey, notesKey, sessionsKey, practiceDraftKey, userScoped, BUNDLED_DATASET_KEY } from './utils/storage';
-import { BUNDLED_SOURCE_ID, HOSTED_SOURCE_ID, hostedSource, loadSources, loadActive, saveActive, loadIndex, loadDataset, datasetKey } from './utils/datasets';
+import { BUNDLED_SOURCE_ID, HOSTED_SOURCE_ID, hostedSource, loadSources, loadActive, saveActive, loadIndex, loadDataset, datasetKey, resolveQuestion, datasetBaseDir } from './utils/datasets';
+import { currentSession } from './aws/auth/session';
 import type { ActiveRef } from './utils/datasets';
 
 type Screen =
@@ -43,7 +44,8 @@ type QuestionEditorProps = {
   datasetId: string;
   question: Question;
   onClose: () => void;
-  onReload: () => void;
+  /** The question as committed to the repo (image paths still relative). */
+  onSaved: (q: Question) => void;
 };
 let QuestionEditor: LazyExoticComponent<ComponentType<QuestionEditorProps>> | null = null;
 if (import.meta.env.VITE_DEPLOY === 'aws') {
@@ -113,6 +115,7 @@ export default function App() {
   const [datasetTitle, setDatasetTitle] = useState(import.meta.env.VITE_DEPLOY === 'aws' ? 'Quizzer' : BUNDLED_TITLE);
   const [datasetExam, setDatasetExam] = useState<ExamRules | null>(null);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
+  const [datasetBase, setDatasetBase] = useState(''); // dir the active dataset's image paths are relative to
   const [datasetLoading, setDatasetLoading] = useState(false);
   const [datasetError, setDatasetError] = useState<string | null>(null);
 
@@ -123,6 +126,7 @@ export default function App() {
     setActive(BUNDLED_REF);
     setDatasetTitle(BUNDLED_TITLE);
     setDatasetExam(null);
+    setDatasetBase('');
     setAllQuestions(qs);
     setIsImported(false);
     setLoadError(qs.length === 0);
@@ -142,6 +146,7 @@ export default function App() {
       setActive(ref);
       setDatasetTitle(entry.title);
       setDatasetExam(entry.exam ?? null);
+      setDatasetBase(datasetBaseDir(entry));
       setAllQuestions(qs);
       setIsImported(false);
       setLoadError(false);
@@ -389,6 +394,19 @@ export default function App() {
   const handleDataset = useCallback(() => setScreen({ name: 'dataset' }), []);
   const handleAdmin = useCallback(() => setScreen({ name: 'admin' }), []);
   const handleEditQuestion = useCallback((q: Question) => setEditingQuestion(q), []);
+
+  // After an admin edit commits, show it right away: the published copy (S3) lags the repo by
+  // 1–2 minutes, so reloading would bring the old text back.
+  const handleQuestionSaved = useCallback((saved: Question) => {
+    if (import.meta.env.VITE_DEPLOY !== 'aws') return; // keeps hostedSource() out of the Pages bundle
+    const resolved = resolveQuestion(hostedSource(), datasetBase, saved);
+    setAllQuestions((qs) => qs.map((q) => (q.id === saved.id ? resolved : q)));
+  }, [datasetBase]);
+
+  // The editor commits to the dataset repo of the *hosted* source, so only offer it there, to
+  // admins (a user-added source may reuse a hosted dataset id and would edit the wrong repo).
+  const editableDatasetId =
+    import.meta.env.VITE_DEPLOY === 'aws' && active.sourceId === HOSTED_SOURCE_ID && currentSession()?.adm ? active.datasetId : undefined;
   const handleRetry = useCallback((result: SessionResult) => {
     setScreen({ name: 'config', mode: result.mode });
   }, []);
@@ -454,15 +472,16 @@ export default function App() {
           onBack={handleHome}
           onResetStat={handleResetStat}
           onResetAllStats={handleResetStats}
-          onEditQuestion={import.meta.env.VITE_DEPLOY === 'aws' ? handleEditQuestion : undefined}
+          editableDatasetId={editableDatasetId}
+          onEditQuestion={handleEditQuestion}
         />
-        {editingQuestion && QuestionEditor && (
+        {editingQuestion && editableDatasetId && QuestionEditor && (
           <Suspense fallback={null}>
             <QuestionEditor
               datasetId={active.datasetId}
               question={editingQuestion}
               onClose={() => setEditingQuestion(null)}
-              onReload={() => { setEditingQuestion(null); void restoreActive(); }}
+              onSaved={handleQuestionSaved}
             />
           </Suspense>
         )}

@@ -8,11 +8,12 @@ interface Props {
   datasetId: string;
   question: Question;
   onClose: () => void;
-  onReload: () => void;
+  /** Called with the committed question so the app shows it before the publish reaches S3. */
+  onSaved: (q: Question) => void;
 }
 
 /** Admin editor for one question. Loads the repo copy, edits it and commits it back. */
-export default function QuestionEditor({ datasetId, question: initial, onClose, onReload }: Props) {
+export default function QuestionEditor({ datasetId, question: initial, onClose, onSaved }: Props) {
   const [question, setQuestion] = useState<Question | null>(null);
   const [sha, setSha] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -20,6 +21,7 @@ export default function QuestionEditor({ datasetId, question: initial, onClose, 
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [reformatted, setReformatted] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -70,8 +72,10 @@ export default function QuestionEditor({ datasetId, question: initial, onClose, 
     setBusy(true);
     setError(null);
     try {
-      await saveDatasetQuestion(datasetId, next.id, sha, next);
+      const out = await saveDatasetQuestion(datasetId, next.id, sha, next);
+      setReformatted(out.reformatted === true);
       setSaved(true);
+      onSaved(next);
     } catch (e) {
       if (e instanceof AdminApiError && e.code === 'conflict') setConflict(true);
       setError(errorText(e));
@@ -117,10 +121,16 @@ export default function QuestionEditor({ datasetId, question: initial, onClose, 
 
           {saved && (
             <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
-              <p>Modifica committata. Il publish parte in automatico: S3/CloudFront si aggiornano in 1–2 minuti.</p>
-              <button onClick={onReload} className="mt-2 inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300">
-                <RefreshCw className="w-3.5 h-3.5" /> Ricarica il dataset ora
-              </button>
+              <p>
+                Modifica committata e già visibile qui. Il publish parte in automatico: per gli altri utenti (e se ricarichi
+                il dataset) S3/CloudFront si aggiornano in 1–2 minuti.
+              </p>
+              {reformatted && (
+                <p className="mt-2 text-xs text-amber-300">
+                  Attenzione: lo stile originale del file non è riproducibile, quindi il commit riscrive tutto il file
+                  (diff più grande di una domanda).
+                </p>
+              )}
             </div>
           )}
 
