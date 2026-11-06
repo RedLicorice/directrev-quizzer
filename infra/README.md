@@ -232,9 +232,12 @@ con le ultime azioni. La logica sta nella Lambda `admin` dietro `/api/admin/*`; 
 - **Modifica domande (P1)**: nella tab Dataset (build AWS, admin) la matita apre l'editor Markdown —
   testo, opzioni, "corretta", spiegazione, `sourceNumber` — con anteprima. Salva **un commit nel repo
   del dataset**; il workflow `publish` aggiorna S3/CloudFront in 1–2 min. `baseSha` impedisce
-  sovrascritture silenziose; l'`id` interno non cambia mai. Niente DynamoDB: il repo resta la fonte di verità.
+  sovrascritture silenziose; l'`id` interno non cambia mai; le immagini restano quelle già nel repo.
+  Lo stile del file (indentazione, a-capo, BOM) è mantenuto, quindi il diff è di una sola domanda.
+  Dopo il salvataggio la modifica è subito visibile in app (il publish arriva dopo 1–2 min).
+  Niente DynamoDB: il repo resta la fonte di verità.
 - **Token GitHub (una volta)**: crea un fine-grained PAT con `Contents: read and write` sui due repo
-  `quizzer-dataset-*` e salvalo come SecureString:
+  `quizzer-dataset-*` e salvalo come SecureString (il nome segue l'ambiente: `/quizzer/<environment>/…`, qui `prod`):
   ```bash
   aws ssm put-parameter --name /quizzer/prod/github-datasets-token \
     --type SecureString --value '<token>' --region us-east-1

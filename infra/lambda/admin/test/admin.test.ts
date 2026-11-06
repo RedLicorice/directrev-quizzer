@@ -280,6 +280,217 @@ describe('dataset editor', () => {
     expect(r.statusCode).toBe(502);
     t.github.putFile = original;
   });
+
+  const put = (t: ReturnType<typeof setup>, sha: string, question: unknown, qid = 1) =>
+    t.handler(ev('PUT', url(qid), { ...ctx(admin()), body: JSON.stringify({ baseSha: sha, question }) }));
+  const stored = (t: ReturnType<typeof setup>) =>
+    JSON.parse(t.github.files.get(`${repo}/${file}`)!.content) as Array<Record<string, unknown>>;
+
+  describe('options and images', () => {
+    const withImages = {
+      id: 1,
+      text: 'Pick',
+      image: 'images/q001.jpeg',
+      options: [
+        { text: '', correct: true, image: 'images/q001_A.jpeg' },
+        { text: 'B', correct: false },
+        { text: '', correct: false, image: 'images/q001_C.jpeg' },
+      ],
+      selectCount: 1,
+      explanationImage: 'images/q001_expl.jpeg',
+    };
+    const seedImages = (t: ReturnType<typeof setup>) => t.github.seed(repo, file, JSON.stringify([withImages, q2], null, 2) + '\n');
+
+    it('keeps the stored image paths when options are edited', async () => {
+      const t = setup();
+      const sha = seedImages(t);
+      const edited = { ...withImages, text: 'Pick one', options: [withImages.options[0], { text: 'B2', correct: false }, withImages.options[2]] };
+      const r = await put(t, sha, edited);
+      expect(r.statusCode).toBe(200);
+      const q = stored(t)[0]!;
+      expect(q.image).toBe('images/q001.jpeg');
+      expect(q.explanationImage).toBe('images/q001_expl.jpeg');
+      expect(q.options).toEqual([
+        { text: '', correct: true, image: 'images/q001_A.jpeg' },
+        { text: 'B2', correct: false },
+        { text: '', correct: false, image: 'images/q001_C.jpeg' },
+      ]);
+    });
+
+    it('still works after an option is removed (images follow their path, not the index)', async () => {
+      const t = setup();
+      const sha = seedImages(t);
+      const edited = { ...withImages, options: [withImages.options[0], withImages.options[2]] };
+      expect((await put(t, sha, edited)).statusCode).toBe(200);
+      expect(stored(t)[0]!.options).toEqual([
+        { text: '', correct: true, image: 'images/q001_A.jpeg' },
+        { text: '', correct: false, image: 'images/q001_C.jpeg' },
+      ]);
+    });
+
+    it('drops an image path the question does not already use, and extra fields', async () => {
+      const t = setup();
+      const sha = seedImages(t);
+      const edited = {
+        ...withImages,
+        options: [
+          { text: 'A', correct: true, image: 'https://evil.example/x.png', extra: 1 },
+          { text: 'B', correct: false, image: '../other/secret.png' },
+        ],
+        selectCount: 1,
+        image: 'https://evil.example/q.png',
+        explanationImage: 'https://evil.example/e.png',
+        injected: 'x',
+      };
+      expect((await put(t, sha, edited)).statusCode).toBe(200);
+      const q = stored(t)[0]!;
+      expect(q.options).toEqual([{ text: 'A', correct: true }, { text: 'B', correct: false }]);
+      expect(q.image).toBe('images/q001.jpeg');
+      expect(q.explanationImage).toBe('images/q001_expl.jpeg');
+      expect(q).not.toHaveProperty('injected');
+    });
+
+    it('an image-only option is valid only through a stored image', async () => {
+      const t = setup();
+      const sha = seedImages(t);
+      const edited = { ...withImages, options: [{ text: '', correct: true }, { text: 'B', correct: false }] };
+      const r = await put(t, sha, edited);
+      expect(r.statusCode).toBe(400);
+      expect(JSON.parse(r.body!).reason).toBe('option_text');
+    });
+  });
+
+  describe('validation', () => {
+    const cases: Array<[string, (q: typeof q1) => unknown, string]> = [
+      ['empty text', (q) => ({ ...q, text: '  ' }), 'text'],
+      ['one option', (q) => ({ ...q, options: [q.options[0]] }), 'options'],
+      ['options not an array', (q) => ({ ...q, options: 'x' }), 'options'],
+      ['option not an object', (q) => ({ ...q, options: [q.options[0], 5] }), 'option_shape'],
+      ['option correct not boolean', (q) => ({ ...q, options: [q.options[0], { text: 'B', correct: 'no' }] }), 'option_correct'],
+      ['option text empty', (q) => ({ ...q, options: [q.options[0], { text: ' ', correct: false }] }), 'option_text'],
+      ['no correct option', (q) => ({ ...q, options: [{ text: 'A', correct: false }, { text: 'B', correct: false }], selectCount: 0 }), 'no_correct'],
+      ['sourceNumber too long', (q) => ({ ...q, sourceNumber: 'x'.repeat(41) }), 'source_number'],
+      ['sourceNumber not a string', (q) => ({ ...q, sourceNumber: 7 }), 'source_number'],
+      ['explanation not a string', (q) => ({ ...q, explanation: 7 }), 'explanation'],
+    ];
+    it.each(cases)('rejects %s', async (_name, make, reason) => {
+      const t = setup();
+      const sha = seed(t);
+      const r = await put(t, sha, make(q1));
+      expect(r.statusCode).toBe(400);
+      expect(JSON.parse(r.body!).reason).toBe(reason);
+      expect(t.github.commits).toHaveLength(0);
+    });
+
+    it('a legacy invalid question elsewhere in the file does not block an edit', async () => {
+      const t = setup();
+      const legacy = { id: 3, text: 'Legacy', options: [{ text: 'A', correct: true }], selectCount: 5 };
+      const sha = t.github.seed(repo, file, JSON.stringify([q1, q2, legacy]));
+      const r = await put(t, sha, { ...q1, text: 'Q1 ok' });
+      expect(r.statusCode).toBe(200);
+      expect(stored(t)[2]).toEqual(legacy);
+    });
+
+    it('rejects a non-object question and a missing body', async () => {
+      const t = setup();
+      const sha = seed(t);
+      expect((await put(t, sha, [1])).statusCode).toBe(400);
+      expect((await put(t, sha, null)).statusCode).toBe(400);
+      const r = await t.handler(ev('PUT', url(), { ...ctx(admin()), body: '{not json' }));
+      expect(JSON.parse(r.body!).error).toBe('bad_json');
+    });
+  });
+
+  describe('request guards', () => {
+    it('accepts a long explanation (above the 8 KiB default) up to the editor limit', async () => {
+      const t = setup();
+      const sha = seed(t);
+      const r = await put(t, sha, { ...q1, explanation: 'x'.repeat(20_000) });
+      expect(r.statusCode).toBe(200);
+      expect((stored(t)[0]!.explanation as string).length).toBe(20_000);
+    });
+
+    it('rejects a body above the editor limit', async () => {
+      const t = setup();
+      const sha = seed(t);
+      const r = await put(t, sha, { ...q1, explanation: 'x'.repeat(70_000) });
+      expect(r.statusCode).toBe(400);
+      expect(JSON.parse(r.body!).error).toBe('bad_json');
+    });
+
+    it('PUT needs the CSRF header and a same-origin request', async () => {
+      const t = setup();
+      const sha = seed(t);
+      const body = JSON.stringify({ baseSha: sha, question: q1 });
+      const noCsrf = ev('PUT', url(), { ...ctx(admin()), body });
+      delete noCsrf.headers!['x-qz-csrf'];
+      expect((await t.handler(noCsrf)).statusCode).toBe(403);
+      const crossSite = ev('PUT', url(), { ...ctx(admin()), body, headers: { 'sec-fetch-site': 'cross-site' } });
+      expect((await t.handler(crossSite)).statusCode).toBe(403);
+      expect(t.github.commits).toHaveLength(0);
+    });
+
+    it('PUT is rate limited', async () => {
+      const t = setup({ limiter: () => false });
+      const sha = seed(t);
+      const r = await put(t, sha, q1);
+      expect(r.statusCode).toBe(429);
+      expect(t.github.commits).toHaveLength(0);
+    });
+
+    it('an unreadable questions file is a logged 502', async () => {
+      const t = setup();
+      t.github.seed(repo, file, '{broken');
+      const r = await t.handler(ev('GET', url(), ctx(admin())));
+      expect(r.statusCode).toBe(502);
+      expect(t.logs.some((l) => l.evt === 'github_error')).toBe(true);
+    });
+  });
+
+  describe('output format', () => {
+    it('keeps a compact file compact and adds no trailing newline', async () => {
+      const t = setup();
+      const raw = JSON.stringify([q1, q2]);
+      const sha = t.github.seed(repo, file, raw);
+      const r = await put(t, sha, { ...q1, text: 'Q1 fixed' });
+      expect(JSON.parse(r.body!).reformatted).toBe(false);
+      expect(t.github.files.get(`${repo}/${file}`)!.content).toBe(JSON.stringify([{ ...q1, text: 'Q1 fixed' }, q2]));
+    });
+
+    it('keeps 2-space indentation and a trailing newline: a one-question diff', async () => {
+      const t = setup();
+      const raw = JSON.stringify([q1, q2], null, 2) + '\n';
+      const sha = t.github.seed(repo, file, raw);
+      await put(t, sha, { ...q1, text: 'Q1 fixed' });
+      const out = t.github.files.get(`${repo}/${file}`)!.content;
+      expect(out).toBe(JSON.stringify([{ ...q1, text: 'Q1 fixed' }, q2], null, 2) + '\n');
+      const changed = out.split('\n').filter((l, i) => l !== raw.split('\n')[i]);
+      expect(changed).toEqual(['    "text": "Q1 fixed",']);
+    });
+
+    it('keeps tab indentation, CRLF line endings and the BOM', async () => {
+      const t = setup();
+      const raw = '﻿' + JSON.stringify([q1, q2], null, '\t').replace(/\n/g, '\r\n') + '\r\n';
+      const sha = t.github.seed(repo, file, raw);
+      const r = await put(t, sha, { ...q1, text: 'Q1 fixed' });
+      expect(r.statusCode).toBe(200);
+      expect(JSON.parse(r.body!).reformatted).toBe(false);
+      const out = t.github.files.get(`${repo}/${file}`)!.content;
+      expect(out.startsWith('﻿[\r\n\t{')).toBe(true);
+      expect(out.endsWith('}\r\n]\r\n')).toBe(true);
+      expect(out).not.toMatch(/[^\r]\n/);
+    });
+
+    it('flags a file whose style cannot be reproduced (escapes) and audits it', async () => {
+      const t = setup();
+      const raw = '[{"id":1,"text":"caf\\u00e9","options":[{"text":"A","correct":true},{"text":"B","correct":false}],"selectCount":1}]';
+      const sha = t.github.seed(repo, file, raw);
+      const r = await put(t, sha, { id: 1, text: 'café', options: [{ text: 'A', correct: true }, { text: 'B', correct: false }], selectCount: 1 });
+      expect(r.statusCode).toBe(200);
+      expect(JSON.parse(r.body!).reformatted).toBe(true);
+      expect(t.audit.some((e) => e.action === 'question_edit' && e.detail === 'file reformatted')).toBe(true);
+    });
+  });
 });
 
 describe('helpers', () => {

@@ -38,8 +38,12 @@ export function createGithubClient(getToken: () => Promise<string>): GithubClien
       const res = await fetch(`${API}/repos/${repo}/contents/${encodePath(path)}?ref=main`, { headers: await headers() });
       if (res.status === 404) return null;
       if (!res.ok) throw new GithubError(res.status);
-      const body = (await res.json()) as { content?: unknown; sha?: unknown };
+      const body = (await res.json()) as { content?: unknown; sha?: unknown; size?: unknown };
       if (typeof body.sha !== 'string' || typeof body.content !== 'string') throw new GithubError(502, 'github bad response');
+      // Above 1 MB the Contents API answers with an empty `content`: fail loudly instead of parsing ''.
+      if (body.content === '' && typeof body.size === 'number' && body.size > 0) {
+        throw new GithubError(413, `${path} is too large for the GitHub contents API (${body.size} bytes)`);
+      }
       return { content: Buffer.from(body.content, 'base64').toString('utf8'), sha: body.sha };
     },
 

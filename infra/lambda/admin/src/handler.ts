@@ -17,6 +17,7 @@ import type { Config } from '../../auth/src/config.js';
 import type { KeyStore } from '../../auth/src/keys.js';
 import { getCookie } from '../../auth/src/cookies.js';
 import { GithubError, type GithubClient } from './github.js';
+import { detectJsonStyle, parseJsonText } from './jsonStyle.js';
 
 export interface UrlEvent {
   rawPath: string;
@@ -91,6 +92,8 @@ const GROUP_RE = /^(admin|ds-all|ds-[a-z0-9][a-z0-9-]{0,62})$/;
 const UID_RE = /^[A-Za-z0-9_-]{2,342}$/;
 const ADMIN_GROUP_TTL_MS = 60_000;
 const MAX_BODY = 8192;
+// One edited question (long markdown explanation, many options) is far bigger than a user action.
+const MAX_EDIT_BODY = 65_536;
 
 const MUTATIONS_PER_HOUR = 30;
 const INVITES_PER_DAY = 20;
@@ -129,11 +132,11 @@ function encodeUid(username: string): string {
   return Buffer.from(username, 'utf8').toString('base64url');
 }
 
-function readBody(ev: UrlEvent): Record<string, unknown> | null {
+function readBody(ev: UrlEvent, max = MAX_BODY): Record<string, unknown> | null {
   if (!ev.body) return {};
   const raw = ev.isBase64Encoded ? Buffer.from(ev.body, 'base64').toString('utf8') : ev.body;
   if (raw.length === 0) return {};
-  if (raw.length > MAX_BODY) return null;
+  if (raw.length > max) return null;
   try {
     const v = JSON.parse(raw) as unknown;
     return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
@@ -200,16 +203,29 @@ function validateQuestion(value: unknown): string | null {
   return null;
 }
 
-function validateAll(questions: unknown[]): string | null {
-  const ids = new Set<number>();
-  for (const raw of questions) {
-    const reason = validateQuestion(raw);
-    if (reason) return reason;
-    const id = (raw as { id: number }).id;
-    if (ids.has(id)) return 'duplicate_id';
-    ids.add(id);
+/**
+ * Options come from the client but only `text` and `correct` are taken from it. An `image` is
+ * kept only when the stored question already uses that exact path, so the editor can never
+ * point an option at an arbitrary URL (images are not editable here).
+ */
+function rebuildOptions(incoming: unknown, stored: unknown): Array<Record<string, unknown>> | string {
+  if (!Array.isArray(incoming) || incoming.length < 2) return 'options';
+  const knownImages = new Set<string>();
+  if (Array.isArray(stored)) {
+    for (const o of stored) {
+      const img = o && typeof o === 'object' ? (o as { image?: unknown }).image : undefined;
+      if (typeof img === 'string') knownImages.add(img);
+    }
   }
-  return null;
+  const out: Array<Record<string, unknown>> = [];
+  for (const raw of incoming) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 'option_shape';
+    const o = raw as Record<string, unknown>;
+    const next: Record<string, unknown> = { text: o.text, correct: o.correct };
+    if (typeof o.image === 'string' && knownImages.has(o.image)) next.image = o.image;
+    out.push(next);
+  }
+  return out;
 }
 
 export function createHandler(deps: Deps) {
@@ -407,9 +423,12 @@ export function createHandler(deps: Deps) {
         if (!file) return json(404, { error: 'dataset_not_editable' });
 
         let questions: unknown;
+        let style: ReturnType<typeof detectJsonStyle>;
         try {
-          questions = JSON.parse(file.content);
+          questions = parseJsonText(file.content);
+          style = detectJsonStyle(file.content);
         } catch {
+          deps.log({ evt: 'github_error', ip, path, error: 'questions file is not valid JSON' });
           return json(502, { error: 'github_error' });
         }
         if (!Array.isArray(questions)) return json(502, { error: 'github_error' });
@@ -418,35 +437,35 @@ export function createHandler(deps: Deps) {
 
         if (!editing) return json(200, { sha: file.sha, question: found });
 
-        const body = readBody(ev);
+        const body = readBody(ev, MAX_EDIT_BODY);
         if (!body) return json(400, { error: 'bad_json' });
         if (typeof body.baseSha !== 'string' || body.baseSha !== file.sha) return json(409, { error: 'conflict' });
         const incoming = body.question;
         if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return json(400, { error: 'invalid_question' });
         const q = incoming as Record<string, unknown>;
         if (q.id !== qid) return json(400, { error: 'invalid_question', reason: 'id_changed' });
-        const reason = validateQuestion(q);
-        if (reason) return json(400, { error: 'invalid_question', reason });
 
-        // Replace in place: keep the array order, the internal id and the image paths.
+        // Replace in place: keep the array order, the internal id and every image path of the
+        // stored question; only the editable fields come from the client.
         const idx = questions.indexOf(found);
         const original = found as Record<string, unknown>;
+        const options = rebuildOptions(q.options, original.options);
+        if (typeof options === 'string') return json(400, { error: 'invalid_question', reason: options });
         const merged: Record<string, unknown> = { ...original };
-        for (const k of ['text', 'options', 'selectCount', 'explanation', 'sourceNumber']) {
+        for (const k of ['text', 'selectCount', 'explanation', 'sourceNumber']) {
           if (Object.prototype.hasOwnProperty.call(q, k)) merged[k] = q[k];
           else delete merged[k];
         }
+        merged.options = options;
         merged.id = qid;
-        if (Object.prototype.hasOwnProperty.call(original, 'image')) merged.image = original.image;
-        if (Object.prototype.hasOwnProperty.call(original, 'explanationImage')) merged.explanationImage = original.explanationImage;
+
+        // Only the edited question is validated: other (legacy) questions of the file must not
+        // block an edit, and the id is pinned so an edit cannot create a duplicate.
+        const reason = validateQuestion(merged);
+        if (reason) return json(400, { error: 'invalid_question', reason });
         questions[idx] = merged;
 
-        const allReason = validateAll(questions);
-        if (allReason) return json(400, { error: 'invalid_question', reason: allReason });
-
-        const trailing = file.content.endsWith('\n');
-        const pretty = file.content.includes('\n');
-        const content = (pretty ? JSON.stringify(questions, null, 2) : JSON.stringify(questions)) + (trailing ? '\n' : '');
+        const content = style.stringify(questions);
         try {
           const out = await deps.github.putFile(
             repoCfg.repo,
@@ -455,8 +474,9 @@ export function createHandler(deps: Deps) {
             file.sha,
             `fix(dataset): edit question ${qid}\n\nEdited via Quizzer admin by ${actor}.`,
           );
-          audit('question_edit', `${datasetId}#${qid}`);
-          return json(200, { sha: out.sha, commit: out.commit });
+          audit('question_edit', `${datasetId}#${qid}`, undefined, style.exact ? undefined : 'file reformatted');
+          // reformatted: the original style could not be reproduced, so the diff is larger than one question.
+          return json(200, { sha: out.sha, commit: out.commit, reformatted: !style.exact });
         } catch (e) {
           if (e instanceof GithubError && e.status === 409) return json(409, { error: 'conflict' });
           deps.log({ evt: 'github_error', ip, path, error: e instanceof Error ? e.message : String(e) });

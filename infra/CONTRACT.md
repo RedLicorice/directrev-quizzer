@@ -196,7 +196,7 @@ The path identifies a user by `base64url(username)`: the Cognito username is the
 
 Admin-only (same three authorization layers and CSRF rules as §5.1). The dataset repo stays the
 source of truth: the Lambda reads/commits `questions.json` through the GitHub Contents API with a
-fine-grained token stored as the SSM SecureString `/quizzer/prod/github-datasets-token` (never sent
+fine-grained token stored as the SSM SecureString `/quizzer/<environment>/github-datasets-token` (never sent
 to the browser). The commit triggers the dataset repo's validate + publish workflow, so S3 and
 CloudFront update in about 1–2 minutes. No DynamoDB.
 
@@ -204,15 +204,23 @@ CloudFront update in about 1–2 minutes. No DynamoDB.
 |---|---|---|---|
 | `GET /api/admin/datasets` | | 200 `{datasets:[{id,repo}]}` — editable datasets | 401/403 |
 | `GET /api/admin/datasets/<ds>/questions/<qid>` | | 200 `{sha, question}` (repo copy) | 404 `dataset_not_editable`/`not_found`; 502 `github_error` |
-| `PUT /api/admin/datasets/<ds>/questions/<qid>` | `{baseSha, question}` | 200 `{sha, commit}` | 400 `invalid_question` (+`reason`); 409 `conflict` when `baseSha` is stale; 429; 502 `github_error` |
+| `PUT /api/admin/datasets/<ds>/questions/<qid>` | `{baseSha, question}` (body ≤ 64 KiB) | 200 `{sha, commit, reformatted}` | 400 `invalid_question` (+`reason`) or `bad_json`; 409 `conflict` when `baseSha` is stale; 429; 502 `github_error` |
 
 - `datasetRepos` in the SSM config maps each id to `{repo: "owner/name", file: "questions.json"}`.
-- The internal `id` can never change (stats/notes/history are keyed on it); images and
-  `explanationImage` cannot be changed through this route; `selectCount` must equal the number of
-  `correct: true` options; `sourceNumber` is a free string (≤ 40 chars, the number in the source
-  document when it differs from `id`).
-- The file is rewritten in its original style (compact one-line vs 2-space indented) so the diff
-  stays small. A stale `baseSha` is a 409, never a silent overwrite.
+- The internal `id` can never change (stats/notes/history are keyed on it); `selectCount` must
+  equal the number of `correct: true` options; `sourceNumber` is a free string (≤ 40 chars, the
+  number in the source document when it differs from `id`).
+- Only `text`, `selectCount`, `explanation`, `sourceNumber` and, per option, `text` + `correct`
+  are taken from the client. Everything else (question `image`, `explanationImage`, unknown
+  fields) comes from the stored question; an option `image` is kept only if the stored question
+  already uses that exact path (so options can be removed or edited, never pointed at a new image).
+- Only the edited question is validated; other questions of the file are copied untouched.
+- The file is rewritten in its original style (compact or indented with 2/4 spaces/tabs, CRLF,
+  trailing newline, BOM) so the commit is a one-question diff. If the style cannot be reproduced
+  byte for byte (e.g. `\uXXXX` escapes) the file is rewritten 2-space/compact, the response has
+  `reformatted: true` and the audit entry says `file reformatted`.
+- A stale `baseSha` is a 409, never a silent overwrite. Files above 1 MB (Contents API limit)
+  are a logged 502.
 
 ## 6. Runtime config (SSM parameter `/quizzer/prod/config`, String, JSON)
 ```json
