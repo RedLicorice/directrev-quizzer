@@ -229,6 +229,22 @@ con le ultime azioni. La logica sta nella Lambda `admin` dietro `/api/admin/*`; 
   `GET /api/admin/audit` (nessun DynamoDB, retention 90 giorni).
 - **Rate limit**: best-effort in memoria (30 mutazioni/ora, 20 inviti/giorno per attore): niente datastore, i limiti veri
   restano il gruppo `admin` e la concorrenza riservata.
+- **Modifica domande (P1)**: nella tab Dataset (build AWS, admin) la matita apre l'editor Markdown —
+  testo, opzioni, "corretta", spiegazione, `sourceNumber` — con anteprima. Salva **un commit nel repo
+  del dataset**; il workflow `publish` aggiorna S3/CloudFront in 1–2 min. `baseSha` impedisce
+  sovrascritture silenziose; l'`id` interno non cambia mai. Niente DynamoDB: il repo resta la fonte di verità.
+- **Token GitHub (una volta)**: crea un fine-grained PAT con `Contents: read and write` sui due repo
+  `quizzer-dataset-*` e salvalo come SecureString:
+  ```bash
+  aws ssm put-parameter --name /quizzer/prod/github-datasets-token \
+    --type SecureString --value '<token>' --region us-east-1
+  ```
+  La Lambda lo legge con `WithDecryption` (IAM: `ssm:GetParameter` + `kms:Decrypt` via SSM). Ruotalo
+  prima della scadenza. Senza token l'editor risponde `github_error`.
+- **Exam rules e `sourceNumber`**: un dataset può portare in `index.json` un blocco `exam`
+  (`questionCount`, `unscoredMax`, `durationMinutes`, `passPercent`) usato come default per Exam e
+  Practice; ogni domanda può avere `sourceNumber` (numero nel documento sorgente). L'`id` resta la
+  chiave stabile usata da stats, note e cronologia.
 - Gli script `invite-user.sh` / `offboard-user.sh` restano per il **bootstrap** (primo admin, emergenze da CLI).
 
 ## 10. Primo publish dei dati

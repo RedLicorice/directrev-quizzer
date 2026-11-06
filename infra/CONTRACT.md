@@ -192,6 +192,28 @@ The path identifies a user by `base64url(username)`: the Cognito username is the
 - Rate limit (best-effort, per warm container, no datastore): 30 mutations/hour and 20 invites/day per actor.
   The real ceilings are the `admin` group check and the Lambda reserved concurrency.
 
+### `/api/admin/datasets/*` (dataset editor, P1)
+
+Admin-only (same three authorization layers and CSRF rules as §5.1). The dataset repo stays the
+source of truth: the Lambda reads/commits `questions.json` through the GitHub Contents API with a
+fine-grained token stored as the SSM SecureString `/quizzer/prod/github-datasets-token` (never sent
+to the browser). The commit triggers the dataset repo's validate + publish workflow, so S3 and
+CloudFront update in about 1–2 minutes. No DynamoDB.
+
+| Method + path | Body | Success | Errors |
+|---|---|---|---|
+| `GET /api/admin/datasets` | | 200 `{datasets:[{id,repo}]}` — editable datasets | 401/403 |
+| `GET /api/admin/datasets/<ds>/questions/<qid>` | | 200 `{sha, question}` (repo copy) | 404 `dataset_not_editable`/`not_found`; 502 `github_error` |
+| `PUT /api/admin/datasets/<ds>/questions/<qid>` | `{baseSha, question}` | 200 `{sha, commit}` | 400 `invalid_question` (+`reason`); 409 `conflict` when `baseSha` is stale; 429; 502 `github_error` |
+
+- `datasetRepos` in the SSM config maps each id to `{repo: "owner/name", file: "questions.json"}`.
+- The internal `id` can never change (stats/notes/history are keyed on it); images and
+  `explanationImage` cannot be changed through this route; `selectCount` must equal the number of
+  `correct: true` options; `sourceNumber` is a free string (≤ 40 chars, the number in the source
+  document when it differs from `id`).
+- The file is rewritten in its original style (compact one-line vs 2-space indented) so the diff
+  stays small. A stale `baseSha` is a 409, never a silent overwrite.
+
 ## 6. Runtime config (SSM parameter `/quizzer/prod/config`, String, JSON)
 ```json
 {
@@ -201,6 +223,10 @@ The path identifies a user by `base64url(username)`: the Cognito username is the
   "region": "us-east-1",
   "appHosts": ["dXXXXXXXXXXXXX.cloudfront.net"],
   "datasets": ["aws-dva-c02", "mule-mcd-01"],
+  "datasetRepos": {
+    "aws-dva-c02": { "repo": "RedLicorice/quizzer-dataset-aws-dva-c02", "file": "questions.json" },
+    "mule-mcd-01": { "repo": "RedLicorice/quizzer-dataset-mule-mcd-01", "file": "questions.json" }
+  },
   "sessionTtlSeconds": 1800,
   "refreshCookieDays": 30
 }

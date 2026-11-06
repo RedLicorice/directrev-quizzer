@@ -241,6 +241,12 @@ How the hosted build works:
 - Admins (group `admin`) get an **Admin** button on the home screen: the `admin/` panel manages users (invite, groups,
   enable/disable, global sign-out, password reset, delete) against `/api/admin/*` and shows the CloudWatch audit log
   (`infra/CONTRACT.md` §5.1).
+- A dataset can carry an official **exam format** (`exam` in `index.json`: question count, duration, passing score,
+  optional unscored questions); Exam and Practice use it as their defaults. A question can carry a `sourceNumber`
+  (the number in the source document when it differs from the internal `id`), shown in practice and flashcards.
+- Admins can edit a question from the **Dataset** tab (Markdown editor with live preview: text, options, correct
+  answers, explanation). The edit is committed to the dataset repo and published by its workflow; the repo stays the
+  source of truth (`infra/CONTRACT.md` §5.1, dataset editor).
 - The service worker never answers `/auth/*`, `/data/*`, `/api/*` with the cached `index.html` and never caches them
   (`navigateFallbackDenylist` + `NetworkOnly`).
 - Fonts are self-hosted (`@fontsource/inter`, `@fontsource/jetbrains-mono`): no external host, CSP-ready.
