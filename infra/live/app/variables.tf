@@ -98,3 +98,13 @@ variable "edge_function_file" {
   type        = string
   default     = null
 }
+
+variable "custom_domain" {
+  description = "Optional custom host name (DNS on Cloudflare, not Route 53), e.g. quizzer.example.com. Null keeps the default *.cloudfront.net domain."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.custom_domain == null || can(regex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$", var.custom_domain))
+    error_message = "custom_domain must be a lower-case host name (letters, digits, hyphens, at least one dot), e.g. quizzer.example.com."
+  }
+}

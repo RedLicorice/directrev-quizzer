@@ -8,6 +8,10 @@ locals {
   }
   app_repo = "${var.github_owner}/${var.app_repo_name}"
 
+  # Public host of the app: custom domain when configured, the CloudFront domain otherwise.
+  app_host = coalesce(var.custom_domain, module.site.distribution_domain_name)
+  aliases  = var.custom_domain == null ? [] : [var.custom_domain]
+
   edge_function_file     = coalesce(var.edge_function_file, "${path.module}/../../edge/session-check.js")
   auth_lambda_dist_dir   = coalesce(var.auth_lambda_dist_dir, "${path.module}/../../lambda/auth/dist")
   admin_lambda_dist_dir  = coalesce(var.admin_lambda_dist_dir, "${path.module}/../../lambda/admin/dist")
@@ -62,6 +66,8 @@ module "site" {
   auth_function_url               = module.lambdas.function_url
   admin_function_url              = module.lambdas.admin_function_url
   log_retention_days              = var.log_retention_days
+  aliases                         = local.aliases
+  acm_certificate_arn             = var.custom_domain == null ? null : aws_acm_certificate_validation.this[0].certificate_arn
 }
 
 module "identity" {
@@ -69,7 +75,7 @@ module "identity" {
   name_prefix   = local.name_prefix
   region        = var.region
   domain_prefix = var.cognito_domain_prefix
-  app_domain    = module.site.distribution_domain_name
+  app_domain    = local.app_host
   dataset_ids   = var.dataset_ids
 }
 
@@ -86,7 +92,7 @@ resource "aws_ssm_parameter" "config" {
     clientId      = module.identity.client_id
     cognitoDomain = module.identity.cognito_domain
     region        = var.region
-    appHosts      = [module.site.distribution_domain_name]
+    appHosts      = [local.app_host]
     datasets      = sort(var.dataset_ids)
     datasetRepos = {
       for id, d in local.datasets : id => { repo = d.repo, file = "questions.json" }

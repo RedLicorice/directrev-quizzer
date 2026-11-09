@@ -43,6 +43,18 @@ variable "log_retention_days" {
   default = 90
 }
 
+variable "aliases" {
+  description = "Alternate domain names (CNAMEs) of the distribution; requires acm_certificate_arn."
+  type        = list(string)
+  default     = []
+}
+
+variable "acm_certificate_arn" {
+  description = "Validated ACM certificate in us-east-1 for the aliases. Null keeps the default *.cloudfront.net certificate."
+  type        = string
+  default     = null
+}
+
 variable "app_noncurrent_days" {
   description = "Days after which non-current app object versions (old hashed chunks) expire."
   type        = number

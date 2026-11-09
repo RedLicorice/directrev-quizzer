@@ -8,7 +8,8 @@ Architettura (piano v2 + delta v3): una distribuzione CloudFront sul dominio di 
 bucket S3 privati (app e dati) dietro OAC, una CloudFront Function `session-check` che verifica il cookie di sessione
 con una chiave HMAC presa dal KeyValueStore (KVS), una Lambda `auth` (Function URL con OAC) che fa il login con
 Cognito (codice + PKCE), una user pool Cognito solo su invito con MFA TOTP opzionale, i ruoli OIDC per GitHub Actions
-e un budget da 5 USD. Niente DynamoDB, niente API, niente passkey, niente dominio custom.
+e un budget da 5 USD. Niente DynamoDB, niente API, niente passkey. Il dominio custom (Cloudflare) è opzionale:
+senza `custom_domain` resta il dominio di default `dXXXX.cloudfront.net`.
 
 Il contratto tra edge, Lambda e app (cookie, claim, endpoint, vettori di test) è in [`CONTRACT.md`](CONTRACT.md).
 
@@ -113,6 +114,7 @@ Variabili principali (`terraform.tfvars`):
 | `budget_amount_usd` | `5` | |
 | `dataset_ids` | `["aws-dva-c02", "mule-mcd-01"]` | repo `RedLicorice/quizzer-dataset-<id>`, gruppi `ds-<id>`, ruoli CI |
 | `create_github_oidc_provider` | `true` | `false` se l'account ha già il provider `token.actions.githubusercontent.com` |
+| `custom_domain` | `"quizzer.example.com"` (assente) | opzionale: host name lower-case; crea certificato ACM + alias CloudFront. Assente = `dXXXX.cloudfront.net`, comportamento invariato |
 
 ```bash
 terraform init -backend-config=backend.hcl
@@ -130,6 +132,29 @@ terraform apply plan.tfplan
   `apply` basta.
 - Output utili: `terraform output` (URL dell'app, id della distribuzione, bucket, user pool, KVS, ruoli) e
   `terraform output -json github_variables`.
+
+### Dominio custom (Cloudflare)
+
+Il dominio custom è opzionale: con `custom_domain` assente resta tutto come prima (`dXXXX.cloudfront.net`, certificato
+di default). La zona DNS è su Cloudflare, quindi **non** ci sono risorse `aws_route53`: i record si aggiungono a mano.
+CloudFront accetta solo certificati ACM emessi in **us-east-1**, che è la regione di default di questo root.
+
+1. In `terraform.tfvars` imposta il dominio (lower-case, es. `custom_domain = "quizzer.gdago.space"`).
+2. Crea prima solo il certificato: `terraform apply -target=aws_acm_certificate.this` (con `count` l'indirizzo
+   completo è `aws_acm_certificate.this[0]`).
+3. `terraform output -json acm_validation_records` mostra i record DNS di validazione (`name`, `type`, `value`):
+   creali in Cloudflare con proxy **OFF** (DNS only, nuvola grigia).
+4. `terraform apply` completo: `aws_acm_certificate_validation` aspetta il record, poi la distribuzione riceve
+   l'alias e il certificato (TLS 1.2/1.3, security policy `TLSv1.2_2021`). Da qui l'host accettato è **solo** il
+   dominio custom: callback e logout Cognito, link d'invito e `appHosts` in SSM usano quello, non più
+   `dXXXX.cloudfront.net`.
+5. `terraform output -raw cname_target` dà il dominio della distribuzione: crea in Cloudflare il CNAME
+   `quizzer` -> quel valore, **proxy OFF** (DNS only, nuvola grigia). Con il proxy attivo ci sarebbe un secondo CDN
+   davanti a CloudFront: cambiano IP e `Host` visti dall'app e si rompono sessione, cookie `__Host-` e controlli
+   di origin.
+
+Il cambio di origine azzera il `localStorage` (statistiche, note, bozze sono per origine): **esporta prima** i dati
+dall'app sul dominio vecchio e reimportali su quello nuovo.
 
 OpenTofu: stessi comandi con `tofu` al posto di `terraform`. Il `.terraform.lock.hcl` committato è quello di
 Terraform (hash per linux/darwin/windows); con `tofu init` il file viene riscritto con gli indirizzi
@@ -366,16 +391,17 @@ https://aws.amazon.com/cognito/pricing/ (piano v2 §7, senza DynamoDB).
 ## 17. Limiti noti
 
 - **TLS**: con il certificato di default `*.cloudfront.net` CloudFront impone la security policy `TLSv1` e non si
-  cambia; i browser moderni negoziano comunque TLS 1.2/1.3, ma uno scanner segnalerà "TLS 1.0 accettato". Si risolve
-  solo con un dominio custom e un certificato ACM (M10). HSTS vale solo per `dXXXX.cloudfront.net`.
+  cambia; i browser moderni negoziano comunque TLS 1.2/1.3, ma uno scanner segnalerà "TLS 1.0 accettato". Con
+  `custom_domain` (certificato ACM) la policy è `TLSv1.2_2021` e HSTS vale per il dominio custom; senza dominio custom
+  HSTS vale solo per `dXXXX.cloudfront.net`.
 - **Stabilità dell'URL**: `dXXXX.cloudfront.net` cambia se la distribuzione viene ricreata: callback Cognito
   (si aggiornano da sole), e-mail d'invito già spedite, segnalibri, PWA installate e localStorage (che è per origine).
-  Per questo `prevent_destroy` + `check-plan.sh`. Un dominio custom (M10) rende l'URL indipendente dalla distribuzione.
+  Per questo `prevent_destroy` + `check-plan.sh`. Un dominio custom rende l'URL indipendente dalla distribuzione.
 - I cambi di gruppo valgono al refresh successivo (massimo 30 minuti); un utente disabilitato resta dentro al massimo
   30 minuti (kill switch nel §13).
 - **Host della Lambda**: dietro OAC la Lambda vede l'host della Function URL (policy `AllViewerExceptHostHeader`),
-  quindi `redirect_uri` usa il primo host configurato in SSM (`appHosts[0]`, il dominio della distribuzione); un
-  `Host`/`X-Forwarded-Host` viene usato solo se è nella lista.
+  quindi `redirect_uri` usa il primo host configurato in SSM (`appHosts[0]`, il dominio dell'app: custom se
+  impostato, altrimenti quello della distribuzione); un `Host`/`X-Forwarded-Host` viene usato solo se è nella lista.
 - Oggetti mancanti in `/data` rispondono 403 (S3 senza `ListBucket` per CloudFront), non 404.
 - Nessun WAF (costerebbe più del budget); la protezione è l'autenticazione all'edge.
 - iOS in modalità PWA standalone può aprire il login Cognito in una vista con cookie separati: da provare (M5).
@@ -412,7 +438,8 @@ AWS CLI finta.
 - [ ] la Lambda legge SSM e il KVS (SigV4A con `@aws-sdk/signature-v4a`) e la prima chiave creata con
       `rotate-session-key.sh --init` viene accettata sia dalla Lambda sia dall'edge;
 - [ ] login reale con Cognito managed login (cambio password al primo accesso, TOTP opzionale), callback, cookie
-      `__Host-`/`__Secure-` su `dXXXX.cloudfront.net`, refresh e logout (revoca + `/logout` di Cognito);
+      `__Host-`/`__Secure-` sull'host dell'app (dominio custom o `dXXXX.cloudfront.net`), refresh e logout (revoca +
+      `/logout` di Cognito);
 - [ ] la Function URL diretta risponde 403 (solo CloudFront può invocarla) e `POST /auth/refresh` passa da OAC con
       `x-amz-content-sha256` dell'app;
 - [ ] `/data/mule-mcd-01/...` dà 403 a chi non ha `ds-mule-mcd-01`; un utente disabilitato è fuori entro 30 minuti;

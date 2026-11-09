@@ -13,7 +13,7 @@ export interface Config {
   clientId: string;
   cognitoDomain: string; // host only, e.g. quizzer-xxxx.auth.eu-central-1.amazoncognito.com
   region: string;
-  appHosts: string[]; // first entry = canonical app host (the CloudFront domain)
+  appHosts: string[]; // first entry = canonical app host (custom domain or the CloudFront domain)
   datasets: string[];
   sessionTtlSeconds: number;
   refreshCookieDays: number;

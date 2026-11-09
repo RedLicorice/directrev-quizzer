@@ -211,3 +211,25 @@ run "behaviors" {
     error_message = "Access logs must not contain cookies (session tokens)."
   }
 }
+
+run "custom_domain_certificate" {
+  command = apply
+  variables {
+    aliases             = ["quizzer.example.com"]
+    acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/11111111-2222-3333-4444-555555555555"
+  }
+
+  assert {
+    condition     = tolist(aws_cloudfront_distribution.this.aliases) == tolist(["quizzer.example.com"])
+    error_message = "Aliases are set on the distribution."
+  }
+  assert {
+    condition = (
+      aws_cloudfront_distribution.this.viewer_certificate[0].acm_certificate_arn == "arn:aws:acm:us-east-1:123456789012:certificate/11111111-2222-3333-4444-555555555555" &&
+      aws_cloudfront_distribution.this.viewer_certificate[0].ssl_support_method == "sni-only" &&
+      aws_cloudfront_distribution.this.viewer_certificate[0].minimum_protocol_version == "TLSv1.2_2021" &&
+      aws_cloudfront_distribution.this.viewer_certificate[0].cloudfront_default_certificate != true
+    )
+    error_message = "Custom certificate: SNI only, TLSv1.2_2021, default certificate off."
+  }
+}

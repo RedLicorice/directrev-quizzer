@@ -157,7 +157,8 @@ body>`; for the empty body that is `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b
   (`https://<app-host><return>`), never on a host taken from the request without validation.
 - **App host / redirect URI**: candidates are, in order, `x-forwarded-host` and `host`; the first one that is in the
   configured `appHosts` list wins, otherwise `appHosts[0]`. Behind CloudFront with OAC the Lambda receives the Function
-  URL host (AllViewerExceptHostHeader policy), so in practice `appHosts[0]` (the distribution domain) is used.
+  URL host (AllViewerExceptHostHeader policy), so in practice `appHosts[0]` (the custom domain when configured,
+  otherwise the distribution domain) is used.
 
 ## 5.1 `/api/admin/*` endpoints (admin Lambda, M7)
 

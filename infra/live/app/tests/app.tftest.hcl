@@ -36,6 +36,20 @@ mock_provider "aws" {
   mock_resource "aws_iam_openid_connect_provider" {
     defaults = { arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com" }
   }
+  mock_resource "aws_acm_certificate" {
+    defaults = {
+      arn = "arn:aws:acm:us-east-1:123456789012:certificate/11111111-2222-3333-4444-555555555555"
+      domain_validation_options = [{
+        domain_name           = "quizzer.gdago.space"
+        resource_record_name  = "_aaaa.quizzer.gdago.space."
+        resource_record_type  = "CNAME"
+        resource_record_value = "_bbbb.acm-validations.aws."
+      }]
+    }
+  }
+  mock_resource "aws_acm_certificate_validation" {
+    defaults = { certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/11111111-2222-3333-4444-555555555555" }
+  }
 }
 
 mock_provider "archive" {
@@ -163,4 +177,48 @@ run "rejects_bad_account_id" {
     account_id = "12345"
   }
   expect_failures = [var.account_id]
+}
+
+run "custom_domain" {
+  command = apply
+  variables {
+    custom_domain = "quizzer.gdago.space"
+  }
+
+  assert {
+    condition     = jsondecode(aws_ssm_parameter.config.value).appHosts == ["quizzer.gdago.space"]
+    error_message = "With a custom domain only it is accepted as app host (the *.cloudfront.net host must not be)."
+  }
+  assert {
+    condition     = output.app_url == "https://quizzer.gdago.space/"
+    error_message = "App URL on the custom domain."
+  }
+  assert {
+    condition = output.acm_validation_records == [{
+      name  = "_aaaa.quizzer.gdago.space."
+      type  = "CNAME"
+      value = "_bbbb.acm-validations.aws."
+    }]
+    error_message = "Validation records are exposed for Cloudflare."
+  }
+  assert {
+    condition     = output.cname_target == "d111111abcdef8.cloudfront.net"
+    error_message = "CNAME target is the distribution domain."
+  }
+  assert {
+    condition     = aws_acm_certificate.this[0].validation_method == "DNS"
+    error_message = "ACM certificate uses DNS validation."
+  }
+  assert {
+    condition     = aws_acm_certificate_validation.this[0].certificate_arn == aws_acm_certificate.this[0].arn
+    error_message = "The distribution gets the validated certificate (certificate_arn), not the raw certificate."
+  }
+}
+
+run "rejects_bad_custom_domain" {
+  command = plan
+  variables {
+    custom_domain = "Quizzer.Gdago.Space"
+  }
+  expect_failures = [var.custom_domain]
 }

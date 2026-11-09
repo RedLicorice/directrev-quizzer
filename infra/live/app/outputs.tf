@@ -1,6 +1,22 @@
 output "app_url" {
-  description = "Public URL of the app."
-  value       = "https://${module.site.distribution_domain_name}/"
+  description = "Public URL of the app (custom domain when set)."
+  value       = "https://${local.app_host}/"
+}
+
+output "acm_validation_records" {
+  description = "DNS records to create in Cloudflare (DNS only) for the custom domain certificate; empty when custom_domain is null."
+  value = [
+    for d in flatten(aws_acm_certificate.this[*].domain_validation_options) : {
+      name  = d.resource_record_name
+      type  = d.resource_record_type
+      value = d.resource_record_value
+    }
+  ]
+}
+
+output "cname_target" {
+  description = "CloudFront distribution domain: CNAME target for the custom domain in Cloudflare (DNS only, proxy off)."
+  value       = module.site.distribution_domain_name
 }
 
 output "distribution_domain_name" {
