@@ -4,6 +4,7 @@ import type { Mode, SessionConfig, SessionResult, SessionRecord, Question, Stats
 import { DEFAULT_CONFIGS } from './types';
 import { shuffle } from './utils/shuffle';
 import { weightedSample } from './utils/weightedSample';
+import { sequentialQuestions } from './utils/sequence';
 import { isAnswerCorrect } from './utils/scoring';
 import { defaultsForDataset } from './utils/examRules';
 import { exportNotesMarkdown, importNotesMarkdown, isNotesMarkdown, exportStatsMarkdown, importStatsMarkdown, isStatsMarkdown } from './utils/notesMarkdown';
@@ -294,6 +295,12 @@ export default function App() {
 
   const handleStartSession = useCallback(
     (mode: Mode, config: SessionConfig) => {
+      if (mode === 'practice' && config.sequential) {
+        const qs = sequentialQuestions(allQuestions, config.startFrom, config.questionCount);
+        setScreen({ name: 'session', mode, config, questions: qs });
+        return;
+      }
+
       const stats = readJSON<Stats>(statsKey(), {});
 
       // Pre-filter pool for weak mode (practice only)
@@ -499,6 +506,7 @@ export default function App() {
     return (
       <ConfigScreen
         mode={screen.mode}
+        questions={allQuestions}
         totalQuestions={allQuestions.length}
         seenCount={seenCount}
         savedDraft={screen.mode === 'practice' ? draft : null}

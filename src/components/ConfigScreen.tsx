@@ -1,10 +1,12 @@
 import { useRef, useState } from 'react';
 import { ArrowLeft, Play, Zap, RotateCcw, Upload } from 'lucide-react';
-import type { Mode, SessionConfig, PracticeSessionDraft, ExamRules } from '../types';
+import type { Mode, SessionConfig, PracticeSessionDraft, ExamRules, Question } from '../types';
 import { examRulesSummary } from '../utils/examRules';
+import { displayNumber, remainingFrom } from '../utils/sequence';
 
 interface Props {
   mode: Mode;
+  questions: Question[];
   totalQuestions: number;
   seenCount: number;
   savedDraft: PracticeSessionDraft | null;
@@ -22,12 +24,16 @@ const LABELS: Record<Mode, { title: string; color: string }> = {
   flashcard: { title: 'Flashcard Mode', color: 'text-blue-400' },
 };
 
-export default function ConfigScreen({ mode, totalQuestions, seenCount, savedDraft, defaults, examRules, onStart, onResume, onImportSession, onBack }: Props) {
+export default function ConfigScreen({ mode, questions, totalQuestions, seenCount, savedDraft, defaults, examRules, onStart, onResume, onImportSession, onBack }: Props) {
   const [config, setConfig] = useState<SessionConfig>({ ...defaults });
   const [importError, setImportError] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const maxQ = Math.max(totalQuestions, 1);
+  const sequential = mode === 'practice' && Boolean(config.sequential);
+  const startMissing = sequential && config.startFrom !== undefined
+    && !questions.some((q) => displayNumber(q) === String(config.startFrom));
+  const maxQ = Math.max(sequential ? remainingFrom(questions, config.startFrom) : totalQuestions, 1);
+  const shownCount = Math.min(config.questionCount, maxQ);
   const { title, color } = LABELS[mode];
   const examSummary = examRulesSummary(examRules);
 
@@ -118,41 +124,91 @@ export default function ConfigScreen({ mode, totalQuestions, seenCount, savedDra
             </div>
           )}
 
+          {/* Sequential order (practice only) */}
+          {mode === 'practice' && (
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
+                <p className="text-sm font-medium text-slate-300">Sequential order</p>
+                <p className="text-xs text-slate-500">Questions in dataset order, no shuffle or weighting</p>
+              </div>
+              <button
+                role="switch"
+                aria-checked={config.sequential ?? false}
+                onClick={() => update('sequential', !config.sequential)}
+                className={`relative w-11 h-6 rounded-full transition-colors ${config.sequential ? 'bg-amber-500' : 'bg-slate-600'}`}
+              >
+                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${config.sequential ? 'left-6' : 'left-1'}`} />
+              </button>
+            </label>
+          )}
+
+          {/* Start question (sequential practice only) */}
+          {sequential && (
+            <div className="space-y-2">
+              <label className="flex justify-between text-sm font-medium text-slate-300">
+                <span>Start from question #</span>
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={config.startFrom ?? ''}
+                placeholder="First"
+                onChange={(e) => update('startFrom', e.target.value === '' ? undefined : Number(e.target.value))}
+                className="w-full rounded-lg border border-slate-700/50 bg-slate-800/60 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:border-amber-500 focus:outline-none"
+              />
+              {startMissing && <p className="text-xs text-rose-400">No question with that number</p>}
+            </div>
+          )}
+
           {/* Question count */}
           <div className="space-y-2">
             <label className="flex justify-between text-sm font-medium text-slate-300">
               <span>Questions</span>
-              <span className="text-amber-400 font-bold">{config.questionCount}</span>
+              <span className="text-amber-400 font-bold">{shownCount}</span>
             </label>
             <input
               type="range"
-              min={5}
+              min={maxQ >= 5 ? 5 : 1}
               max={maxQ}
-              step={5}
-              value={config.questionCount}
+              step={maxQ >= 5 ? 5 : 1}
+              value={shownCount}
               onChange={(e) => update('questionCount', Number(e.target.value))}
               className="w-full accent-amber-500"
             />
             <div className="flex justify-between text-xs text-slate-500">
-              <span>5</span><span>{maxQ} available</span>
+              <span>{maxQ >= 5 ? 5 : 1}</span>
+              <span>
+                {maxQ} available{sequential ? ' from start' : ''}
+                {sequential && shownCount < maxQ && (
+                  <button
+                    type="button"
+                    onClick={() => update('questionCount', maxQ)}
+                    className="ml-2 text-amber-400 hover:text-amber-300 transition-colors"
+                  >
+                    To the end
+                  </button>
+                )}
+              </span>
             </div>
           </div>
 
           {/* Shuffle */}
-          <label className="flex items-center justify-between cursor-pointer">
-            <div>
-              <p className="text-sm font-medium text-slate-300">{mode === 'flashcard' ? 'Randomize order' : 'Shuffle questions'}</p>
-              <p className="text-xs text-slate-500">Randomize order each session</p>
-            </div>
-            <button
-              role="switch"
-              aria-checked={config.shuffle}
-              onClick={() => update('shuffle', !config.shuffle)}
-              className={`relative w-11 h-6 rounded-full transition-colors ${config.shuffle ? 'bg-amber-500' : 'bg-slate-600'}`}
-            >
-              <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${config.shuffle ? 'left-6' : 'left-1'}`} />
-            </button>
-          </label>
+          {!sequential && (
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
+                <p className="text-sm font-medium text-slate-300">{mode === 'flashcard' ? 'Randomize order' : 'Shuffle questions'}</p>
+                <p className="text-xs text-slate-500">Randomize order each session</p>
+              </div>
+              <button
+                role="switch"
+                aria-checked={config.shuffle}
+                onClick={() => update('shuffle', !config.shuffle)}
+                className={`relative w-11 h-6 rounded-full transition-colors ${config.shuffle ? 'bg-amber-500' : 'bg-slate-600'}`}
+              >
+                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${config.shuffle ? 'left-6' : 'left-1'}`} />
+              </button>
+            </label>
+          )}
 
           {/* Time limit (exam only) */}
           {mode === 'exam' && (
@@ -201,7 +257,7 @@ export default function ConfigScreen({ mode, totalQuestions, seenCount, savedDra
           )}
 
           {/* Seen / unseen balance (all modes) */}
-          {(() => {
+          {!sequential && (() => {
             const unseenFrac = config.seenBias;          // 0 = all seen, 1 = all unseen
             const total      = config.questionCount;
             const wantUnseen = Math.round(total * unseenFrac);
@@ -239,7 +295,7 @@ export default function ConfigScreen({ mode, totalQuestions, seenCount, savedDra
           })()}
 
           {/* Practice-only options */}
-          {mode === 'practice' && (
+          {mode === 'practice' && !sequential && (
             <>
               {/* Weak Mode toggle */}
               <div className="space-y-3">
@@ -298,7 +354,8 @@ export default function ConfigScreen({ mode, totalQuestions, seenCount, savedDra
 
           <button
             onClick={() => onStart(mode, config)}
-            className="btn-primary w-full flex items-center justify-center gap-2 text-base py-3"
+            disabled={startMissing}
+            className="btn-primary w-full flex items-center justify-center gap-2 text-base py-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Play className="w-4 h-4" /> Start Session
           </button>

@@ -80,6 +80,8 @@ export interface SessionConfig {
   bias: number;         // 0.0 = favour mastered, 0.5 = balanced, 1.0 = favour struggling (practice only)
   weakMode: boolean;    // only pick questions with success rate < 60% or unseen (practice only)
   seenBias: number;     // 0.0 = seen only, 0.5 = mixed (default), 1.0 = unseen only (all modes)
+  sequential?: boolean; // practice only: dataset order, no shuffle or weighting
+  startFrom?: number;   // practice only: displayed number of the first question (unset = first)
 }
 
 export interface SessionResult {
