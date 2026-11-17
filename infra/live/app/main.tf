@@ -99,6 +99,18 @@ resource "aws_ssm_parameter" "config" {
     }
     sessionTtlSeconds = 1800
     refreshCookieDays = 30
+    inviteLinks = {
+      tableName       = module.lambdas.invite_links_table_name
+      defaultTtlHours = var.invite_links.default_ttl_hours
+      maxTtlHours     = var.invite_links.max_ttl_hours
+      defaultMaxUses  = var.invite_links.default_max_uses
+      maxMaxUses      = var.invite_links.max_max_uses
+      retentionDays   = var.invite_links.retention_days
+      joinRateLimit = {
+        attempts      = var.invite_links.join_attempts
+        windowSeconds = var.invite_links.join_window_seconds
+      }
+    }
   })
 }
 

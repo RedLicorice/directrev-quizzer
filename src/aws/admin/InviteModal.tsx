@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { X, Send, AlertTriangle } from 'lucide-react';
+import { X, Send, AlertTriangle, Mail, Link2 } from 'lucide-react';
 import { inviteUser, errorText } from './adminApi';
+import InviteLinksPanel from './InviteLinksPanel';
 
 const MCD = 'ds-mule-mcd-01';
 
@@ -10,8 +11,9 @@ interface Props {
   onDone: () => void;
 }
 
-/** Modal to invite a user (Cognito AdminCreateUser) and pick their groups. */
+/** Modal to invite a user: by e-mail (Cognito AdminCreateUser, with groups) or through a registration link. */
 export default function InviteModal({ datasets, onClose, onDone }: Props) {
+  const [mode, setMode] = useState<'email' | 'link'>('email');
   const [email, setEmail] = useState('');
   const [groups, setGroups] = useState<Set<string>>(new Set());
   const [confirmMcd, setConfirmMcd] = useState(false);
@@ -49,12 +51,28 @@ export default function InviteModal({ datasets, onClose, onDone }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <form onSubmit={submit} className="card w-full max-w-md p-6 animate-slide-up">
+      <div className={`card w-full ${mode === 'link' ? 'max-w-2xl' : 'max-w-md'} max-h-[90vh] overflow-y-auto p-6 animate-slide-up`}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Invita utente</h2>
           <button type="button" onClick={onClose} className="btn-ghost p-1"><X className="w-4 h-4" /></button>
         </div>
 
+        <div className="flex gap-2 mb-4">
+          {([['email', 'E-mail', Mail], ['link', 'Link di invito', Link2]] as const).map(([m, label, Icon]) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+                ${mode === m ? 'bg-amber-500 text-slate-900' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
+            >
+              <Icon className="w-4 h-4" /> {label}
+            </button>
+          ))}
+        </div>
+
+        {mode === 'link' ? <InviteLinksPanel /> : (
+        <form onSubmit={submit}>
         <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">E-mail</label>
         <input
           type="email"
@@ -100,7 +118,9 @@ export default function InviteModal({ datasets, onClose, onDone }: Props) {
         <p className="mt-3 text-xs text-slate-500">
           Cognito invia un’e-mail con password temporanea (valida 7 giorni). Gruppi senza <span className="font-mono">ds-*</span>/<span className="font-mono">ds-all</span>/<span className="font-mono">admin</span> non danno accesso.
         </p>
-      </form>
+        </form>
+        )}
+      </div>
     </div>
   );
 }

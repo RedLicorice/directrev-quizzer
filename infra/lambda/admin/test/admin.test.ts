@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { SESSION_COOKIE } from '../../../edge/session-core.js';
 import { setup, ev, token, ADMIN_EMAIL } from './fakes.js';
 import { decodeUid } from '../src/handler.js';
-import { createInMemoryLimiter } from '../src/limiter.js';
+import { createInMemoryLimiter } from '../../auth/src/limiter.js';
 import { GithubError } from '../src/github.js';
 
 const cookie = (t: string) => [`${SESSION_COOKIE}=${t}`];

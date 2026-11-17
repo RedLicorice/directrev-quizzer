@@ -10,12 +10,15 @@
 // `x-qz-csrf: 1` header and (enforced by CloudFront OAC, not here) `x-amz-content-sha256`.
 // Every mutation is written to CloudWatch Logs as a structured `admin_action` record
 // before the response is sent; there is no DynamoDB (plan v3 delta 5).
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { checkToken, parseToken, SESSION_COOKIE } from '../../../edge/session-core.js';
 import type { SessionClaims } from '../../../edge/session-core.js';
 import type { Config } from '../../auth/src/config.js';
 import type { KeyStore } from '../../auth/src/keys.js';
 import { getCookie } from '../../auth/src/cookies.js';
+import { EMAIL_RE, isSameOrigin, rawBody } from '../../auth/src/request.js';
+import type { Limiter } from '../../auth/src/limiter.js';
+import { INVITE_ID_RE, hashToken, inviteStatus, type InviteItem, type InviteStore } from '../../auth/src/inviteStore.js';
 import { GithubError, type CommitFile, type GithubClient } from './github.js';
 import { IMAGE_PATH_RE, decodeUploads, imageName } from './images.js';
 import { detectJsonStyle, parseJsonText } from './jsonStyle.js';
@@ -71,8 +74,7 @@ export interface AuditEntry {
   ip?: string;
 }
 
-/** Returns true when the call is within the limit (best-effort, per container). */
-export type Limiter = (key: string, limit: number, windowMs: number) => boolean;
+export type { Limiter };
 
 export interface Deps {
   getConfig(): Promise<Config>;
@@ -83,12 +85,12 @@ export interface Deps {
   nowMs(): number;
   log(entry: Record<string, unknown>): void;
   limiter: Limiter;
+  invites: InviteStore;
 }
 
 export const hmac = (key: string, data: string) => createHmac('sha256', key).update(data).digest('base64url');
 
 const BASE = '/api/admin';
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const GROUP_RE = /^(admin|ds-all|ds-[a-z0-9][a-z0-9-]{0,62})$/;
 const UID_RE = /^[A-Za-z0-9_-]{2,342}$/;
 const ADMIN_GROUP_TTL_MS = 60_000;
@@ -100,6 +102,7 @@ const MAX_EDIT_BODY = 5_200_000;
 
 const MUTATIONS_PER_HOUR = 30;
 const INVITES_PER_DAY = 20;
+const NOTE_MAX = 80;
 
 function json(statusCode: number, body: unknown, allow?: string): UrlResult {
   return {
@@ -136,10 +139,9 @@ function encodeUid(username: string): string {
 }
 
 function readBody(ev: UrlEvent, max = MAX_BODY): Record<string, unknown> | null {
-  if (!ev.body) return {};
-  const raw = ev.isBase64Encoded ? Buffer.from(ev.body, 'base64').toString('utf8') : ev.body;
+  const raw = rawBody(ev, max);
+  if (raw === null) return null;
   if (raw.length === 0) return {};
-  if (raw.length > max) return null;
   try {
     const v = JSON.parse(raw) as unknown;
     return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
@@ -181,6 +183,25 @@ function publicUser(u: AdminUser) {
     enabled: u.enabled,
     groups: [...u.groups].sort(),
   };
+}
+
+function publicLink(item: InviteItem, nowMs: number) {
+  return {
+    id: item.id,
+    ...(item.note ? { note: item.note } : {}),
+    createdBy: item.createdBy,
+    createdAt: item.createdAt,
+    expiresAt: item.expiresAt,
+    maxUses: item.maxUses,
+    uses: item.uses,
+    status: inviteStatus(item, nowMs),
+  };
+}
+
+/** `undefined` -> default; otherwise an integer in [1, max], else null. */
+function boundedInt(v: unknown, fallback: number, max: number): number | null {
+  if (v === undefined) return fallback;
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= max ? v : null;
 }
 
 /** Structural validation shared by the editor route and its tests. */
@@ -296,11 +317,7 @@ export function createHandler(deps: Deps) {
       const actor = claims.email;
       const mutating = method !== 'GET' && method !== 'HEAD';
       if (mutating) {
-        const origin = headers['origin'];
-        const site = headers['sec-fetch-site'];
-        if ((origin && !cfg.appHosts.some((h) => origin === `https://${h}`)) || (site && site !== 'same-origin')) {
-          return json(403, { error: 'bad_origin' });
-        }
+        if (!isSameOrigin(headers, cfg.appHosts)) return json(403, { error: 'bad_origin' });
         if (headers['x-qz-csrf'] !== '1') return json(403, { error: 'csrf' });
       }
 
@@ -413,6 +430,68 @@ export function createHandler(deps: Deps) {
         }
 
         return json(405, { error: 'method_not_allowed' }, 'PUT, POST, DELETE');
+      }
+
+      // ── invite links: registration URLs that create accounts without any dataset ─────
+      const linkMatch = path.match(/^\/api\/admin\/invite-links(?:\/([^/]*))?$/);
+      if (linkMatch) {
+        const links = cfg.inviteLinks;
+        if (!links) return json(404, { error: 'invite_links_disabled' });
+        const linkId = linkMatch[1];
+
+        if (linkId === undefined) {
+          if (method === 'GET' || method === 'HEAD') {
+            const items = (await deps.invites.list()).sort((a, b) => b.createdAt - a.createdAt);
+            return json(200, {
+              links: items.map((i) => publicLink(i, nowMs)),
+              defaults: {
+                ttlHours: links.defaultTtlHours,
+                maxTtlHours: links.maxTtlHours,
+                maxUses: links.defaultMaxUses,
+                maxMaxUses: links.maxMaxUses,
+              },
+            });
+          }
+          if (method === 'POST') {
+            const body = readBody(ev);
+            if (!body) return json(400, { error: 'bad_request', reason: 'body' });
+            const ttlHours = boundedInt(body.ttlHours, links.defaultTtlHours, links.maxTtlHours);
+            if (ttlHours === null) return json(400, { error: 'bad_request', reason: 'ttlHours' });
+            const maxUses = boundedInt(body.maxUses, links.defaultMaxUses, links.maxMaxUses);
+            if (maxUses === null) return json(400, { error: 'bad_request', reason: 'maxUses' });
+            let note: string | undefined;
+            if (body.note !== undefined) {
+              if (typeof body.note !== 'string') return json(400, { error: 'bad_request', reason: 'note' });
+              const trimmed = body.note.trim();
+              if (trimmed.length > NOTE_MAX || /[\x00-\x1f\x7f]/.test(trimmed)) return json(400, { error: 'bad_request', reason: 'note' });
+              if (trimmed) note = trimmed;
+            }
+            if (!limited(`link:${actor}`, INVITES_PER_DAY, 86_400_000)) return json(429, { error: 'rate_limited' });
+            const token = randomBytes(32).toString('base64url');
+            const id = hashToken(token);
+            const expiresAt = nowMs + ttlHours * 3_600_000;
+            await deps.invites.create({
+              id,
+              createdBy: actor,
+              createdAt: nowMs,
+              expiresAt,
+              maxUses,
+              uses: 0,
+              ...(note ? { note } : {}),
+              ttl: Math.floor(expiresAt / 1000) + links.retentionDays * 86_400,
+            });
+            audit('link_create', id, undefined, `ttlHours=${ttlHours} maxUses=${maxUses}`);
+            return json(201, { id, url: `https://${cfg.appHosts[0]}/auth/join?t=${token}`, expiresAt, maxUses });
+          }
+          return json(405, { error: 'method_not_allowed' }, 'GET, POST');
+        }
+
+        if (!INVITE_ID_RE.test(linkId)) return json(404, { error: 'not_found' });
+        if (method !== 'DELETE') return json(405, { error: 'method_not_allowed' }, 'DELETE');
+        if (!limited(`mut:${actor}`, MUTATIONS_PER_HOUR, 3_600_000)) return json(429, { error: 'rate_limited' });
+        if (!(await deps.invites.revoke(linkId, nowMs))) return json(404, { error: 'not_found' });
+        audit('link_revoke', linkId);
+        return json(200, { id: linkId, status: 'revoked' });
       }
 
       // ── dataset editor (P1): read/commit one question in its dataset repo ─────

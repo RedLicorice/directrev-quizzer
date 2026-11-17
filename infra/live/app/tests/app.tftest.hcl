@@ -111,6 +111,15 @@ run "full_stack" {
       }
       sessionTtlSeconds = 1800
       refreshCookieDays = 30
+      inviteLinks = {
+        tableName       = "quizzer-prod-invite-links"
+        defaultTtlHours = 168
+        maxTtlHours     = 720
+        defaultMaxUses  = 1
+        maxMaxUses      = 50
+        retentionDays   = 30
+        joinRateLimit   = { attempts = 10, windowSeconds = 600 }
+      }
     }
     error_message = "SSM runtime config must match CONTRACT.md §6."
   }
@@ -221,4 +230,48 @@ run "rejects_bad_custom_domain" {
     custom_domain = "Quizzer.Gdago.Space"
   }
   expect_failures = [var.custom_domain]
+}
+
+run "invite_links_overrides" {
+  command = plan
+  variables {
+    invite_links = {
+      default_ttl_hours = 24
+      max_max_uses      = 5
+      join_attempts     = 3
+    }
+  }
+  assert {
+    condition = (
+      jsondecode(aws_ssm_parameter.config.value).inviteLinks.defaultTtlHours == 24 &&
+      jsondecode(aws_ssm_parameter.config.value).inviteLinks.maxMaxUses == 5 &&
+      jsondecode(aws_ssm_parameter.config.value).inviteLinks.maxTtlHours == 720 &&
+      jsondecode(aws_ssm_parameter.config.value).inviteLinks.joinRateLimit.attempts == 3
+    )
+    error_message = "Unset invite_links attributes keep their defaults."
+  }
+}
+
+run "rejects_default_above_max" {
+  command = plan
+  variables {
+    invite_links = { default_ttl_hours = 800 }
+  }
+  expect_failures = [var.invite_links]
+}
+
+run "rejects_non_positive_or_fractional_invite_limits" {
+  command = plan
+  variables {
+    invite_links = { max_max_uses = 0 }
+  }
+  expect_failures = [var.invite_links]
+}
+
+run "rejects_fractional_invite_limit" {
+  command = plan
+  variables {
+    invite_links = { retention_days = 1.5 }
+  }
+  expect_failures = [var.invite_links]
 }

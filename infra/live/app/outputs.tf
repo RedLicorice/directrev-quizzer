@@ -60,6 +60,11 @@ output "admin_function_name" {
   value = module.lambdas.admin_function_name
 }
 
+output "invite_links_table" {
+  description = "DynamoDB table of the invite links."
+  value       = module.lambdas.invite_links_table_name
+}
+
 output "config_parameter" {
   value = aws_ssm_parameter.config.name
 }

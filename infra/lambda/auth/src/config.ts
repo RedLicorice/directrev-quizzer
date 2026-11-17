@@ -8,6 +8,17 @@ export interface DatasetRepo {
   file: string; // questions.json inside the repo
 }
 
+export interface InviteLinksConfig {
+  tableName: string;
+  defaultTtlHours: number;
+  maxTtlHours: number;
+  defaultMaxUses: number;
+  maxMaxUses: number;
+  retentionDays: number;
+  /** Per-IP limit on POST /auth/join: at most `attempts` per `windowSeconds`. */
+  joinRateLimit: { attempts: number; windowSeconds: number };
+}
+
 export interface Config {
   userPoolId: string;
   clientId: string;
@@ -19,11 +30,38 @@ export interface Config {
   refreshCookieDays: number;
   /** Admin-only: where each dataset lives, for the in-app editor (M7/P1). */
   datasetRepos?: Record<string, DatasetRepo>;
+  /** Absent = the invite-link feature is disabled. */
+  inviteLinks?: InviteLinksConfig;
 }
 
 const HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const FILE_RE = /^[A-Za-z0-9._/-]+$/;
+const TABLE_NAME_RE = /^[A-Za-z0-9_.-]{3,255}$/;
+
+function parseInviteLinks(raw: unknown): InviteLinksConfig {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('config.inviteLinks must be an object');
+  const o = raw as Record<string, unknown>;
+  const posInt = (v: unknown, name: string): number => {
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1) throw new Error(`config.inviteLinks.${name} must be a positive integer`);
+    return v;
+  };
+  if (typeof o.tableName !== 'string' || !TABLE_NAME_RE.test(o.tableName)) throw new Error('config.inviteLinks.tableName invalid');
+  const rl = o.joinRateLimit as Record<string, unknown> | null | undefined;
+  if (!rl || typeof rl !== 'object' || Array.isArray(rl)) throw new Error('config.inviteLinks.joinRateLimit must be an object');
+  const cfg: InviteLinksConfig = {
+    tableName: o.tableName,
+    defaultTtlHours: posInt(o.defaultTtlHours, 'defaultTtlHours'),
+    maxTtlHours: posInt(o.maxTtlHours, 'maxTtlHours'),
+    defaultMaxUses: posInt(o.defaultMaxUses, 'defaultMaxUses'),
+    maxMaxUses: posInt(o.maxMaxUses, 'maxMaxUses'),
+    retentionDays: posInt(o.retentionDays, 'retentionDays'),
+    joinRateLimit: { attempts: posInt(rl.attempts, 'joinRateLimit.attempts'), windowSeconds: posInt(rl.windowSeconds, 'joinRateLimit.windowSeconds') },
+  };
+  if (cfg.defaultTtlHours > cfg.maxTtlHours) throw new Error('config.inviteLinks.defaultTtlHours exceeds maxTtlHours');
+  if (cfg.defaultMaxUses > cfg.maxMaxUses) throw new Error('config.inviteLinks.defaultMaxUses exceeds maxMaxUses');
+  return cfg;
+}
 
 export function parseConfig(raw: string): Config {
   const c = JSON.parse(raw) as Partial<Config>;
@@ -68,6 +106,8 @@ export function parseConfig(raw: string): Config {
     }
   }
 
+  const inviteLinks = c.inviteLinks === undefined ? undefined : parseInviteLinks(c.inviteLinks);
+
   return {
     userPoolId: str(c.userPoolId, 'userPoolId'),
     clientId: str(c.clientId, 'clientId'),
@@ -78,6 +118,7 @@ export function parseConfig(raw: string): Config {
     sessionTtlSeconds: ttl,
     refreshCookieDays: days,
     ...(datasetRepos ? { datasetRepos } : {}),
+    ...(inviteLinks ? { inviteLinks } : {}),
   };
 }
 

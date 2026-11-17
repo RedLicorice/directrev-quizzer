@@ -4,6 +4,7 @@ import type { AdminUser, AdminOverview, AuditEntry } from './adminApi';
 import { getOverview, listUsers, getAudit, errorText } from './adminApi';
 import InviteModal from './InviteModal';
 import UserDetailModal from './UserDetailModal';
+import { hasNoAccess } from './inviteLinks';
 
 const STATUS_LABEL: Record<string, string> = {
   CONFIRMED: 'Attivo',
@@ -162,6 +163,11 @@ export default function AdminScreen({ onBack }: { onBack: () => void }) {
                         <div className="flex items-center gap-2">
                           <span className="truncate text-sm text-slate-200">{u.email}</span>
                           <StatusBadge user={u} />
+                          {u.enabled && hasNoAccess(u.groups) && (
+                            <span className="shrink-0 rounded-full bg-sky-500/15 px-2 py-0.5 text-xs text-sky-400" title="Nessun gruppo: assegna i dataset da «Gestisci»">
+                              senza accesso
+                            </span>
+                          )}
                         </div>
                         {u.groups.length > 0 && (
                           <div className="mt-1 flex flex-wrap gap-1">

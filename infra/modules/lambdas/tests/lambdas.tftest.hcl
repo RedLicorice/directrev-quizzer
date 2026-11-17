@@ -3,6 +3,10 @@ mock_provider "aws" {
     defaults = { arn = "arn:aws:iam::123456789012:role/quizzer-test-auth-lambda" }
   }
   override_resource {
+    target = aws_dynamodb_table.invite_links
+    values = { arn = "arn:aws:dynamodb:eu-central-1:123456789012:table/quizzer-test-invite-links" }
+  }
+  override_resource {
     target = aws_lambda_function.auth
     values = { arn = "arn:aws:lambda:eu-central-1:123456789012:function:quizzer-test-auth" }
   }
@@ -100,19 +104,66 @@ run "least_privilege" {
       { Sid = "Logs", Effect = "Allow", Action = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = ["arn:aws:logs:eu-central-1:123456789012:log-group:/aws/lambda/quizzer-test-auth:*"] },
       { Sid = "ReadConfig", Effect = "Allow", Action = ["ssm:GetParameter"], Resource = ["arn:aws:ssm:eu-central-1:123456789012:parameter/quizzer/prod/config"] },
       { Sid = "ReadSessionKeys", Effect = "Allow", Action = ["cloudfront-keyvaluestore:GetKey", "cloudfront-keyvaluestore:DescribeKeyValueStore"], Resource = ["arn:aws:cloudfront::123456789012:key-value-store/0000-kvs"] },
+      { Sid = "InviteLinks", Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:UpdateItem"], Resource = ["arn:aws:dynamodb:eu-central-1:123456789012:table/quizzer-test-invite-links"] },
+      { Sid = "CognitoSelfRegistration", Effect = "Allow", Action = ["cognito-idp:AdminCreateUser", "cognito-idp:AdminSetUserPassword"], Resource = ["arn:aws:cognito-idp:eu-central-1:123456789012:userpool/*"] },
     ]
-    error_message = "auth Lambda policy: logs, one SSM parameter, the KVS. Nothing else."
+    error_message = "auth Lambda policy: logs, one SSM parameter, the KVS, read/redeem on the invite table, account creation. Nothing else."
   }
   assert {
     condition     = jsondecode(aws_iam_role.auth.assume_role_policy).Statement[0].Principal == { Service = "lambda.amazonaws.com" }
     error_message = "Only Lambda can assume the role."
   }
   assert {
-    condition     = [for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s.Sid] == ["Logs", "ReadAuditLogs", "ReadConfig", "ReadGithubToken", "DecryptGithubToken", "ReadSessionKeys", "CognitoUserManagement"]
-    error_message = "Admin policy statements: logs (write + audit read), config, GitHub token (+ decrypt), KVS keys, Cognito user management."
+    condition     = [for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s.Sid] == ["Logs", "ReadAuditLogs", "ReadConfig", "ReadGithubToken", "DecryptGithubToken", "ReadSessionKeys", "CognitoUserManagement", "InviteLinks"]
+    error_message = "Admin policy statements: logs (write + audit read), config, GitHub token (+ decrypt), KVS keys, Cognito user management, invite links table."
   }
   assert {
     condition     = one([for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s if s.Sid == "CognitoUserManagement"]).Resource == ["arn:aws:cognito-idp:eu-central-1:123456789012:userpool/*"]
     error_message = "Cognito admin scope limited to this account and region."
+  }
+}
+
+run "invite_links_table" {
+  command = apply
+  assert {
+    condition = (
+      aws_dynamodb_table.invite_links.name == "quizzer-test-invite-links" &&
+      aws_dynamodb_table.invite_links.billing_mode == "PAY_PER_REQUEST" &&
+      aws_dynamodb_table.invite_links.hash_key == "id" &&
+      one(aws_dynamodb_table.invite_links.attribute).name == "id" &&
+      one(aws_dynamodb_table.invite_links.attribute).type == "S"
+    )
+    error_message = "On-demand table keyed by `id` (string), named <prefix>-invite-links."
+  }
+  assert {
+    condition     = one(aws_dynamodb_table.invite_links.ttl).attribute_name == "ttl" && one(aws_dynamodb_table.invite_links.ttl).enabled
+    error_message = "Items expire through the `ttl` attribute."
+  }
+  assert {
+    condition     = one(aws_dynamodb_table.invite_links.server_side_encryption).enabled
+    error_message = "Server-side encryption on."
+  }
+  assert {
+    condition     = output.invite_links_table_name == "quizzer-test-invite-links"
+    error_message = "The table name is exported for the runtime config."
+  }
+}
+
+run "invite_links_least_privilege" {
+  command = apply
+  assert {
+    condition     = one([for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s if s.Sid == "InviteLinks"]).Action == ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Scan"]
+    error_message = "Admin: create, read, revoke and list links; no delete, no other table."
+  }
+  assert {
+    condition = alltrue([
+      for p in [aws_iam_role_policy.auth.policy, aws_iam_role_policy.admin.policy] :
+      one([for s in jsondecode(p).Statement : s if s.Sid == "InviteLinks"]).Resource == ["arn:aws:dynamodb:eu-central-1:123456789012:table/quizzer-test-invite-links"]
+    ])
+    error_message = "Both roles reach only the invite links table ARN (no wildcard, no index)."
+  }
+  assert {
+    condition     = !contains(flatten([for s in jsondecode(aws_iam_role_policy.auth.policy).Statement : s.Action]), "cognito-idp:AdminAddUserToGroup")
+    error_message = "The auth Lambda can never put a self-registered user in a group."
   }
 }

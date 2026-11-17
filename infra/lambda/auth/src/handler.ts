@@ -22,7 +22,20 @@ import {
   type Fetch,
 } from './cognito.js';
 import { computeAccess } from './access.js';
-import { loginErrorPage, notEnabledPage } from './html.js';
+import {
+  JOIN_SCRIPT,
+  joinBusyPage,
+  joinDonePage,
+  joinErrorPage,
+  joinFormPage,
+  joinInvalidPage,
+  loginErrorPage,
+  notEnabledPage,
+} from './html.js';
+import { INVITE_TOKEN_RE, hashToken, inviteStatus, type InviteStore } from './inviteStore.js';
+import type { AccountCreator } from './accounts.js';
+import type { Limiter } from './limiter.js';
+import { EMAIL_RE, isSameOrigin, rawBody } from './request.js';
 
 export interface UrlEvent {
   rawPath: string;
@@ -49,7 +62,12 @@ export interface Deps {
   nowMs(): number;
   random(n: number): Buffer;
   log(entry: Record<string, unknown>): void;
+  invites: InviteStore;
+  accounts: AccountCreator;
+  limiter: Limiter;
 }
+
+const MAX_JOIN_BODY = 4096;
 
 export const hmac = (key: string, data: string) => createHmac('sha256', key).update(data).digest('base64url');
 
@@ -64,6 +82,12 @@ const html = (statusCode: number, body: string, extraCookies?: string[]): UrlRes
   statusCode,
   headers: { 'content-type': 'text/html; charset=utf-8', ...NO_STORE },
   ...(extraCookies ? { cookies: extraCookies } : {}),
+  body,
+});
+const JOIN_HEADERS = { 'referrer-policy': 'no-referrer' };
+const joinHtml = (statusCode: number, body: string): UrlResult => ({
+  statusCode,
+  headers: { 'content-type': 'text/html; charset=utf-8', ...NO_STORE, ...JOIN_HEADERS },
   body,
 });
 const redirect = (location: string, extraCookies?: string[]): UrlResult => ({
@@ -205,9 +229,7 @@ export function createHandler(deps: Deps) {
           r.headers.allow = 'POST';
           return r;
         }
-        const origin = headers['origin'];
-        const site = headers['sec-fetch-site'];
-        if ((origin && !cfg.appHosts.some((h) => origin === `https://${h}`)) || (site && site !== 'same-origin')) {
+        if (!isSameOrigin(headers, cfg.appHosts)) {
           deps.log({ evt: 'refresh_denied', ip, reason: 'bad_origin' });
           return json(403, { error: 'bad_origin' });
         }
@@ -255,6 +277,84 @@ export function createHandler(deps: Deps) {
         // it would wipe the local progress of every user of this browser.
         r.headers['clear-site-data'] = '"cache"';
         return r;
+      }
+
+      if (path === '/auth/join.js' && (method === 'GET' || method === 'HEAD')) {
+        if (!cfg.inviteLinks) return json(404, { error: 'invite_links_disabled' });
+        return { statusCode: 200, headers: { 'content-type': 'text/javascript; charset=utf-8', ...NO_STORE }, body: JOIN_SCRIPT };
+      }
+
+      if (path === '/auth/join') {
+        const links = cfg.inviteLinks;
+        if (!links) return json(404, { error: 'invite_links_disabled' });
+
+        if (method === 'GET' || method === 'HEAD') {
+          const token = q.t ?? '';
+          const item = INVITE_TOKEN_RE.test(token) ? await deps.invites.get(hashToken(token)) : null;
+          if (!item || inviteStatus(item, deps.nowMs()) !== 'active') return joinHtml(410, joinInvalidPage());
+          return joinHtml(200, joinFormPage(token));
+        }
+
+        if (method !== 'POST') {
+          const r = json(405, { error: 'method_not_allowed' });
+          r.headers.allow = 'GET, POST';
+          return r;
+        }
+        if (!isSameOrigin(headers, cfg.appHosts)) {
+          deps.log({ evt: 'join', ip, result: 'bad_origin' });
+          return json(403, { error: 'bad_origin' });
+        }
+        if (!deps.limiter(`join:${ip ?? 'unknown'}`, links.joinRateLimit.attempts, links.joinRateLimit.windowSeconds * 1000)) {
+          deps.log({ evt: 'join', ip, result: 'rate_limited' });
+          return joinHtml(429, joinBusyPage());
+        }
+        const raw = rawBody(ev, MAX_JOIN_BODY);
+        if (raw === null) return json(413, { error: 'too_large' });
+        const form = new URLSearchParams(raw);
+        const token = form.get('t') ?? '';
+        const email = (form.get('email') ?? '').trim();
+        const password = form.get('password') ?? '';
+        const password2 = form.get('password2') ?? '';
+
+        const id = INVITE_TOKEN_RE.test(token) ? hashToken(token) : null;
+        const item = id ? await deps.invites.get(id) : null;
+        if (!id || !item || inviteStatus(item, deps.nowMs()) !== 'active') {
+          deps.log({ evt: 'join', ip, ...(id ? { id } : {}), result: 'invalid_link' });
+          return joinHtml(410, joinInvalidPage());
+        }
+        const again = (error: string, status = 400) => joinHtml(status, joinFormPage(token, email, error));
+        if (!EMAIL_RE.test(email) || email.length > 254) {
+          deps.log({ evt: 'join', ip, id, result: 'bad_email' });
+          return again('Inserisci un indirizzo email valido.');
+        }
+        if (password.length === 0 || password !== password2) {
+          deps.log({ evt: 'join', ip, id, result: 'password_mismatch' });
+          return again('Le due password non coincidono.');
+        }
+        if (!(await deps.invites.redeem(id, deps.nowMs()))) {
+          deps.log({ evt: 'join', ip, id, result: 'invalid_link' });
+          return joinHtml(410, joinInvalidPage());
+        }
+        try {
+          await deps.accounts.create(email, password);
+        } catch (e) {
+          await deps.invites.release(id);
+          const name = e instanceof Error ? e.name : 'unknown';
+          if (name === 'UsernameExistsException') {
+            deps.log({ evt: 'join', ip, id, result: 'exists' });
+            return again('Esiste già un account con questa email: accedi.', 409);
+          }
+          if (name === 'InvalidPasswordException') {
+            deps.log({ evt: 'join', ip, id, result: 'invalid_password' });
+            const detail = e instanceof Error ? e.message.replace(/^[^:]*:\s*/, '').slice(0, 200) : '';
+            return again(`Password non valida${detail ? `: ${detail}` : ''}.`);
+          }
+          // Only the error name: SDK messages are not logged next to credentials.
+          deps.log({ evt: 'join', ip, id, result: 'error', error: name });
+          return joinHtml(500, joinErrorPage());
+        }
+        deps.log({ evt: 'join', ip, id, result: 'ok' });
+        return joinHtml(200, joinDonePage());
       }
 
       return json(404, { error: 'not_found' });

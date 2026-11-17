@@ -6,6 +6,8 @@ import type { Config } from '../src/config.js';
 import { createConfigLoader } from '../src/config.js';
 import { createKeyStore } from '../src/keys.js';
 import { createHandler, type UrlEvent } from '../src/handler.js';
+import { createInMemoryLimiter } from '../src/limiter.js';
+import { FakeAccounts, FakeInviteStore, INVITE_LINKS } from './fakeInvites.js';
 
 export const CONFIG: Config = {
   userPoolId: 'eu-central-1_TESTPOOL',
@@ -16,6 +18,7 @@ export const CONFIG: Config = {
   datasets: ['aws-dva-c02', 'mule-mcd-01'],
   sessionTtlSeconds: 1800,
   refreshCookieDays: 30,
+  inviteLinks: INVITE_LINKS,
 };
 export const APP = 'https://d111111abcdef8.cloudfront.net';
 export const KEY1 = 'k1-secret-0123456789abcdefghijklmnopqrstuv';
@@ -127,6 +130,8 @@ export function setup(opts: { kvs?: Record<string, string>; config?: Partial<Con
     counters.kvs++;
     return Object.prototype.hasOwnProperty.call(kvs, k) ? kvs[k]! : null;
   }, () => nowMs);
+  const invites = new FakeInviteStore();
+  const accounts = new FakeAccounts();
   const handler = createHandler({
     getConfig,
     keys,
@@ -134,8 +139,13 @@ export function setup(opts: { kvs?: Record<string, string>; config?: Partial<Con
     nowMs: () => nowMs,
     random: (n) => randomBytes(n),
     log: (e) => logs.push(e),
+    invites,
+    accounts,
+    limiter: createInMemoryLimiter(() => nowMs),
   });
   return {
+    invites,
+    accounts,
     cognito,
     kvs,
     counters,
@@ -151,7 +161,11 @@ export function setup(opts: { kvs?: Record<string, string>; config?: Partial<Con
   };
 }
 
-export function ev(method: string, pathAndQuery: string, o: { cookies?: string[]; headers?: Record<string, string> } = {}): UrlEvent {
+export function ev(
+  method: string,
+  pathAndQuery: string,
+  o: { cookies?: string[]; headers?: Record<string, string>; body?: string; isBase64Encoded?: boolean } = {},
+): UrlEvent {
   const u = new URL(pathAndQuery, APP);
   const qs: Record<string, string> = {};
   u.searchParams.forEach((v, k) => (qs[k] = v));
@@ -160,6 +174,7 @@ export function ev(method: string, pathAndQuery: string, o: { cookies?: string[]
     rawQueryString: u.search.slice(1),
     ...(u.search ? { queryStringParameters: qs } : {}),
     ...(o.cookies ? { cookies: o.cookies } : {}),
+    ...(o.body !== undefined ? { body: o.body, ...(o.isBase64Encoded ? { isBase64Encoded: true } : {}) } : {}),
     headers: { host: 'abcdefghij.lambda-url.eu-central-1.on.aws', ...(o.headers ?? {}) },
     requestContext: { http: { method, sourceIp: '130.176.0.1' } },
   };

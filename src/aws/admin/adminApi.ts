@@ -80,6 +80,47 @@ export const signOutUser = (key: string) => mutate(`/api/admin/users/${key}/sign
 export const resetUserPassword = (key: string) => mutate(`/api/admin/users/${key}/reset`, 'POST');
 export const deleteUser = (key: string) => mutate(`/api/admin/users/${key}`, 'DELETE');
 
+// ── invite links ──────────────────────────────────────────────────────────────
+
+export type InviteLinkStatus = 'active' | 'expired' | 'exhausted' | 'revoked';
+
+export interface InviteLink {
+  id: string;
+  note?: string;
+  createdBy: string;
+  createdAt: number; // epoch ms
+  expiresAt: number; // epoch ms
+  maxUses: number;
+  uses: number;
+  status: InviteLinkStatus;
+}
+
+/** Server-provided form defaults and upper bounds (never hard-coded in the UI). */
+export interface InviteLinkDefaults {
+  ttlHours: number;
+  maxTtlHours: number;
+  maxUses: number;
+  maxMaxUses: number;
+}
+
+export interface CreatedInviteLink {
+  id: string;
+  url: string; // contains the token: shown once
+  expiresAt: number;
+  maxUses: number;
+}
+
+export interface InviteLinkRequest { ttlHours: number; maxUses: number; note?: string }
+
+export const listInviteLinks = () =>
+  request<{ links: InviteLink[]; defaults: InviteLinkDefaults }>('/api/admin/invite-links');
+
+export const createInviteLink = (body: InviteLinkRequest) =>
+  mutate<CreatedInviteLink>('/api/admin/invite-links', 'POST', body);
+
+export const revokeInviteLink = (id: string) =>
+  mutate<{ id: string; status: 'revoked' }>(`/api/admin/invite-links/${id}`, 'DELETE');
+
 // ── dataset editing (admin, M7/P1) ────────────────────────────────────────────
 
 export interface DatasetQuestionFile {
@@ -130,7 +171,9 @@ export function errorText(e: unknown): string {
       case 'bad_group': return 'Gruppo non valido.';
       case 'mcd_confirmation_required': return 'Conferma esplicitamente l’accesso a mule-mcd-01.';
       case 'rate_limited': return 'Troppe operazioni: riprova più tardi.';
-      case 'not_found': return 'Utente non trovato.';
+      case 'not_found': return 'Elemento non trovato.';
+      case 'invite_links_disabled': return 'I link di invito non sono abilitati su questo ambiente.';
+      case 'bad_request': return e.reason ? `Richiesta non valida (${e.reason}).` : 'Richiesta non valida: controlla i valori inseriti.';
       case 'dataset_not_editable': return 'Questo dataset non è modificabile da qui (serve un repo GitHub configurato).';
       case 'conflict': return 'Il dataset è cambiato nel frattempo: ricarica la domanda e riapplica le modifiche.';
       case 'too_large': return 'La domanda è troppo grande.';

@@ -19,3 +19,14 @@ budget_amount_usd     = 5
 # dataset_oidc_subjects = {
 #   "aws-dva-c02" = ["repo:RedLicorice@<ownerId>/quizzer-dataset-aws-dva-c02@<repoId>:environment:prod"]
 # }
+
+# Invite links (all optional; these are the defaults).
+# invite_links = {
+#   default_ttl_hours   = 168   # validity offered by default in the admin UI
+#   max_ttl_hours       = 720
+#   default_max_uses    = 1
+#   max_max_uses        = 50
+#   retention_days      = 30    # expired/revoked links stay in the table (and the admin list) this long
+#   join_attempts       = 10    # per IP and window on POST /auth/join
+#   join_window_seconds = 600
+# }

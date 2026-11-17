@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto';
 import { signSession } from '../../../edge/session-core.js';
 import { createKeyStore } from '../../auth/src/keys.js';
 import type { Config } from '../../auth/src/config.js';
+import { FakeInviteStore, INVITE_LINKS } from '../../auth/test/fakeInvites.js';
 import { GithubError, type CommitInput, type GithubClient } from '../src/github.js';
 import {
   createHandler,
@@ -29,6 +30,7 @@ export const CONFIG: Config = {
   },
   sessionTtlSeconds: 1800,
   refreshCookieDays: 30,
+  inviteLinks: INVITE_LINKS,
 };
 export const APP = 'https://d111111abcdef8.cloudfront.net';
 export const ADMIN_EMAIL = 'admin@example.com';
@@ -151,15 +153,16 @@ export class FakeGithub implements GithubClient {
   }
 }
 
-export function setup(opts: { limiter?: Limiter } = {}) {
+export function setup(opts: { limiter?: Limiter; config?: Partial<Config> } = {}) {
   const cognito = new FakeCognito();
+  const invites = new FakeInviteStore();
   const github = new FakeGithub();
   const logs: Record<string, unknown>[] = [];
   const audit: AuditEntry[] = [];
   let nowMs = NOW_SEC * 1000;
   const keys = createKeyStore(async (k) => (k === `qz-key-${KID}` ? KEY1 : null), () => nowMs);
   const handler = createHandler({
-    getConfig: async () => CONFIG,
+    getConfig: async () => ({ ...CONFIG, ...opts.config }),
     keys,
     cognito,
     github,
@@ -171,8 +174,10 @@ export function setup(opts: { limiter?: Limiter } = {}) {
       if (e.evt === 'admin_action') audit.push(e as unknown as AuditEntry);
     },
     limiter: opts.limiter ?? (() => true),
+    invites,
   });
   return {
+    invites,
     cognito,
     github,
     logs,

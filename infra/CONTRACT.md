@@ -234,6 +234,54 @@ CloudFront update in about 1–2 minutes. No DynamoDB.
 - A stale `baseSha` is a 409, never a silent overwrite. Files above 1 MB (Contents API limit)
   are a logged 502.
 
+## 5.2 Invite links (`/auth/join`, `/api/admin/invite-links`)
+
+An admin creates an invite link; whoever opens it registers with e-mail + password and the account is created directly
+(no e-mail is sent). The link grants **no dataset**: the new user gets no group and lands on "Accesso non abilitato"
+(`computeAccess` returns null) until an admin assigns groups. When `inviteLinks` is absent from the runtime config (§6)
+every route below answers **404** `{"error":"invite_links_disabled"}`.
+
+**Token and storage.** Token = 32 random bytes, base64url (43 chars); URL `https://<appHosts[0]>/auth/join?t=<token>`.
+Only `id = sha256(token)` (lower-case hex, 64 chars) is stored; the token is shown to the admin once. DynamoDB table
+`<name_prefix>-invite-links` (PAY_PER_REQUEST, SSE on, hash key `id` S, TTL attribute `ttl` = `expiresAt/1000 +
+retentionDays*86400`). Item: `id, createdBy (e-mail), createdAt (ms), expiresAt (ms), maxUses, uses, note?, revokedAt?, ttl`.
+Status (derived): `revoked` (`revokedAt` set) > `expired` (`now >= expiresAt`) > `exhausted` (`uses >= maxUses`) > `active`.
+Redeem is one conditional `UpdateItem ADD uses :one` with `attribute_exists(id) AND attribute_not_exists(revokedAt) AND
+expiresAt > :now AND uses < maxUses`; if user creation then fails the use is given back (`ADD uses :minus_one`, best effort).
+
+**Public (auth Lambda, under `/auth/*`).**
+
+| Method + path | Input | Success | Errors |
+|---|---|---|---|
+| `GET /auth/join?t=<token>` | | **200** HTML registration form (POSTs to `/auth/join`: hidden `t`, `email`, `password`, `password2`) | **410** HTML "Link non valido o scaduto", identical for unknown, malformed, expired, exhausted and revoked |
+| `GET /auth/join.js` | | **200** `text/javascript`: submits the form with `fetch` + `x-amz-content-sha256` (CloudFront OAC rejects a `POST` to a Function URL without it, and a plain `<form>` cannot send it) | |
+| `POST /auth/join` | `application/x-www-form-urlencoded`, body <= 4 KiB | **200** HTML "Account creato" (link to `/auth/login`) | **403** `bad_origin` (`Origin` not an app host, or `Sec-Fetch-Site` not same-origin); **429** HTML (per-IP limit `joinRateLimit`); **410** generic page (link not usable); **400** form again (bad e-mail, passwords differ, weak password: policy message); **409** form again "Esiste già un account con questa email"; **413** `too_large`; **500** HTML (unexpected Cognito error, use released) |
+
+All pages: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`; no inline script (CSP `script-src 'self'`). Order on POST: origin,
+rate limit, body, link is active (read), input validation (**no use is consumed** for bad input), atomic redeem, Cognito
+`AdminCreateUser` (`MessageAction=SUPPRESS`, `email` + `email_verified=true`, the chosen password as `TemporaryPassword` so the pool
+policy is enforced before any user exists) then `AdminSetUserPassword` (`Permanent=true`). The pool keeps
+`allow_admin_create_user_only = true`. Log record `{"evt":"join","ip","id","result"}` with `result` in `ok`, `invalid_link`,
+`bad_email`, `password_mismatch`, `exists`, `invalid_password`, `error` (+ error **name**), `rate_limited`, `bad_origin`; never the
+password, the token or the e-mail.
+
+**Admin (admin Lambda, same three authorization layers, `x-qz-csrf: 1`, origin check).**
+
+| Method + path | Body | Success | Errors |
+|---|---|---|---|
+| `GET /api/admin/invite-links` | | 200 `{links:[{id,note?,createdBy,createdAt,expiresAt,maxUses,uses,status}], defaults:{ttlHours,maxTtlHours,maxUses,maxMaxUses}}`, newest first; never a token | 401/403/404 |
+| `POST /api/admin/invite-links` | `{ttlHours?, maxUses?, note?}` (omitted = defaults; integers in `[1, max]`; note <= 80 chars, no control characters) | 201 `{id,url,expiresAt,maxUses}` | 400 `bad_request` + `reason` (`ttlHours`, `maxUses`, `note`, `body`); 429 `rate_limited` (20/day per actor, shared constant with invites) |
+| `DELETE /api/admin/invite-links/<id>` | | 200 `{id,status:"revoked"}` (idempotent) | 404 `not_found` (unknown or not 64 hex chars); 429 (30 mutations/hour) |
+
+Audit: `link_create` (target = id, detail `ttlHours=.. maxUses=..`) and `link_revoke` (target = id).
+
+**Caveat.** The new user's e-mail is marked verified **without any proof** of ownership: whoever holds the link can register
+any address. That is why a link carries no access; an admin must check the e-mail before assigning groups.
+
+**IAM.** auth role: `dynamodb:GetItem|UpdateItem` on the table ARN; `cognito-idp:AdminCreateUser|AdminSetUserPassword` on
+`userpool/*` of the account/region (the exact pool ARN would create the Terraform cycle explained for the admin Lambda). It has no
+`AdminAddUserToGroup`. admin role: `dynamodb:PutItem|GetItem|UpdateItem|Scan` on the table ARN.
+
 ## 6. Runtime config (SSM parameter `/quizzer/prod/config`, String, JSON)
 ```json
 {
@@ -248,9 +296,21 @@ CloudFront update in about 1–2 minutes. No DynamoDB.
     "mule-mcd-01": { "repo": "RedLicorice/quizzer-dataset-mule-mcd-01", "file": "questions.json" }
   },
   "sessionTtlSeconds": 1800,
-  "refreshCookieDays": 30
+  "refreshCookieDays": 30,
+  "inviteLinks": {
+    "tableName": "quizzer-prod-invite-links",
+    "defaultTtlHours": 168,
+    "maxTtlHours": 720,
+    "defaultMaxUses": 1,
+    "maxMaxUses": 50,
+    "retentionDays": 30,
+    "joinRateLimit": { "attempts": 10, "windowSeconds": 600 }
+  }
 }
 ```
+
+`inviteLinks` is optional (absent = feature off); `parseConfig` requires every field to be a positive integer (`tableName` a
+valid table name) and `default* <= max*`. Terraform fills it from the `invite_links` variable (§5.2).
 
 The Lambda reads it at cold start (cache 5 min). Environment variables of the Lambda: `CONFIG_PARAMETER`
 (the parameter name), `KVS_ARN`. This breaks the Terraform dependency cycle (plan v2 §4.4).

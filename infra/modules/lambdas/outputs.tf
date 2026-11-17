@@ -25,3 +25,7 @@ output "admin_function_name" {
 output "admin_function_url" {
   value = aws_lambda_function_url.admin.function_url
 }
+
+output "invite_links_table_name" {
+  value = aws_dynamodb_table.invite_links.name
+}

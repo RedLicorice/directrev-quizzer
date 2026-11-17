@@ -2,11 +2,14 @@
 import '@aws-sdk/signature-v4a'; // registers the pure-JS SigV4a signer needed by the KVS data-plane API
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { CloudFrontKeyValueStoreClient, GetKeyCommand } from '@aws-sdk/client-cloudfront-keyvaluestore';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { createDynamoInviteStore } from '../../auth/src/inviteStore.js';
 import { createConfigLoader } from '../../auth/src/config.js';
 import { createKeyStore } from '../../auth/src/keys.js';
 import { createCognitoAdmin, createAuditReader } from './aws.js';
 import { createGithubClient } from './github.js';
-import { createInMemoryLimiter } from './limiter.js';
+import { createInMemoryLimiter } from '../../auth/src/limiter.js';
 import { createHandler } from './handler.js';
 
 const CONFIG_PARAMETER = process.env.CONFIG_PARAMETER ?? '';
@@ -59,4 +62,9 @@ export const handler = createHandler({
   nowMs: Date.now,
   log: (entry) => console.log(JSON.stringify(entry)),
   limiter: createInMemoryLimiter(Date.now),
+  invites: createDynamoInviteStore(DynamoDBDocumentClient.from(new DynamoDBClient({})), async () => {
+    const links = (await getConfig()).inviteLinks;
+    if (!links) throw new Error('invite links are not configured');
+    return links.tableName;
+  }),
 });

@@ -10,6 +10,31 @@ locals {
   log_group_arn              = "arn:aws:logs:${var.region}:${var.account_id}:log-group:/aws/lambda/${local.function_name}"
 }
 
+# ── invite links: registration URLs created by admins, redeemed by the auth Lambda ──────────
+# Only sha256(token) is stored (hash key `id`); items expire through the TTL attribute `ttl`.
+resource "aws_dynamodb_table" "invite_links" {
+  #checkov:skip=CKV_AWS_28:no point-in-time recovery: links are short-lived and can simply be issued again
+  #checkov:skip=CKV_AWS_119:SSE uses the AWS managed key (no per-key cost); a customer managed KMS key would add cost for hashes of expiring links
+  #checkov:skip=CKV2_AWS_16:no auto scaling: the table is PAY_PER_REQUEST
+  name         = "${var.name_prefix}-invite-links"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+}
+
 resource "aws_cloudwatch_log_group" "auth" {
   #checkov:skip=CKV_AWS_158:logs contain no tokens or secrets; KMS would add cost and key management
   name              = "/aws/lambda/${local.function_name}"
@@ -51,6 +76,22 @@ locals {
         Effect   = "Allow"
         Action   = ["cloudfront-keyvaluestore:GetKey", "cloudfront-keyvaluestore:DescribeKeyValueStore"]
         Resource = [var.kvs_arn]
+      },
+      {
+        Sid      = "InviteLinks"
+        Effect   = "Allow"
+        Action   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
+        Resource = [aws_dynamodb_table.invite_links.arn]
+      },
+      {
+        # Same cycle as the admin Lambda below: user pool -> (callback URL of the) site distribution
+        # -> /auth/* behavior -> this function, so the exact pool ARN cannot be referenced. The pool
+        # id is read from SSM at runtime; `userpool/*` in this account and region has the same blast radius.
+        #checkov:skip=CKV_AWS_356:wildcard pool ARN avoids a Terraform cycle, see comment
+        Sid      = "CognitoSelfRegistration"
+        Effect   = "Allow"
+        Action   = ["cognito-idp:AdminCreateUser", "cognito-idp:AdminSetUserPassword"]
+        Resource = ["arn:aws:cognito-idp:${var.region}:${var.account_id}:userpool/*"]
       },
     ]
   }
@@ -209,6 +250,12 @@ locals {
           "cognito-idp:AdminDeleteUser",
         ]
         Resource = ["arn:aws:cognito-idp:${var.region}:${var.account_id}:userpool/*"]
+      },
+      {
+        Sid      = "InviteLinks"
+        Effect   = "Allow"
+        Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Scan"]
+        Resource = [aws_dynamodb_table.invite_links.arn]
       },
     ]
   }

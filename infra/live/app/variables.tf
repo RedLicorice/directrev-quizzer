@@ -108,3 +108,27 @@ variable "custom_domain" {
     error_message = "custom_domain must be a lower-case host name (letters, digits, hyphens, at least one dot), e.g. quizzer.example.com."
   }
 }
+
+variable "invite_links" {
+  description = "Invite links (admin-created registration URLs that create accounts with no dataset): TTL and use limits offered to admins, how long expired links stay in the table, and the per-IP limit on the public join form."
+  type = object({
+    default_ttl_hours   = optional(number, 168)
+    max_ttl_hours       = optional(number, 720)
+    default_max_uses    = optional(number, 1)
+    max_max_uses        = optional(number, 50)
+    retention_days      = optional(number, 30)
+    join_attempts       = optional(number, 10)
+    join_window_seconds = optional(number, 600)
+  })
+  default = {}
+  validation {
+    condition = alltrue([
+      for v in values(var.invite_links) : v >= 1 && v == floor(v)
+    ])
+    error_message = "Every invite_links value must be a positive integer."
+  }
+  validation {
+    condition     = var.invite_links.default_ttl_hours <= var.invite_links.max_ttl_hours && var.invite_links.default_max_uses <= var.invite_links.max_max_uses
+    error_message = "invite_links defaults must not exceed their maximums."
+  }
+}
