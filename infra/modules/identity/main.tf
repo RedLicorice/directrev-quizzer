@@ -2,7 +2,8 @@
 # prefix domain with managed login v2, public app client with code + PKCE.
 
 locals {
-  app_url = coalesce(var.invite_app_url, "https://${var.app_domain}/")
+  app_url   = coalesce(var.invite_app_url, "https://${var.app_domain}/")
+  app_hosts = distinct(concat([var.app_domain], var.extra_app_domains))
 }
 
 resource "aws_cognito_user_pool" "this" {
@@ -78,8 +79,8 @@ resource "aws_cognito_user_pool_client" "app" {
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   supported_identity_providers         = ["COGNITO"]
-  callback_urls                        = ["https://${var.app_domain}/auth/callback"]
-  logout_urls                          = ["https://${var.app_domain}/signed-out.html"]
+  callback_urls                        = [for h in local.app_hosts : "https://${h}/auth/callback"]
+  logout_urls                          = [for h in local.app_hosts : "https://${h}/signed-out.html"]
   explicit_auth_flows                  = ["ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_SRP_AUTH"]
 
   prevent_user_existence_errors = "ENABLED"

@@ -11,6 +11,9 @@ locals {
   # Public host of the app: custom domain when configured, the CloudFront domain otherwise.
   app_host = coalesce(var.custom_domain, module.site.distribution_domain_name)
   aliases  = var.custom_domain == null ? [] : [var.custom_domain]
+  # Further hosts that serve the app besides app_host (they share the session key but not cookies).
+  extra_hosts = var.custom_domain != null && var.also_serve_cloudfront_domain ? [module.site.distribution_domain_name] : []
+  app_hosts   = concat([local.app_host], local.extra_hosts)
 
   edge_function_file     = coalesce(var.edge_function_file, "${path.module}/../../edge/session-check.js")
   auth_lambda_dist_dir   = coalesce(var.auth_lambda_dist_dir, "${path.module}/../../lambda/auth/dist")
@@ -76,7 +79,9 @@ module "identity" {
   region        = var.region
   domain_prefix = var.cognito_domain_prefix
   app_domain    = local.app_host
-  dataset_ids   = var.dataset_ids
+
+  extra_app_domains = local.extra_hosts
+  dataset_ids       = var.dataset_ids
 }
 
 # Runtime config of the auth Lambda (CONTRACT.md §6). It depends on the client and the
@@ -92,7 +97,7 @@ resource "aws_ssm_parameter" "config" {
     clientId      = module.identity.client_id
     cognitoDomain = module.identity.cognito_domain
     region        = var.region
-    appHosts      = [local.app_host]
+    appHosts      = local.app_hosts
     datasets      = sort(var.dataset_ids)
     datasetRepos = {
       for id, d in local.datasets : id => { repo = d.repo, file = "questions.json" }

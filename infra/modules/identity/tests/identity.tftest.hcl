@@ -99,3 +99,14 @@ run "rejects_bad_prefix" {
   }
   expect_failures = [var.domain_prefix]
 }
+
+run "extra_app_domains_get_their_own_callbacks" {
+  command = plan
+  variables {
+    extra_app_domains = ["quizzer.example.com"]
+  }
+  assert {
+    condition     = aws_cognito_user_pool_client.app.callback_urls == toset(["https://d111111abcdef8.cloudfront.net/auth/callback", "https://quizzer.example.com/auth/callback"])
+    error_message = "Every accepted app host needs its callback URL."
+  }
+}

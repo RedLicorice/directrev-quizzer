@@ -109,6 +109,12 @@ variable "custom_domain" {
   }
 }
 
+variable "also_serve_cloudfront_domain" {
+  description = "With a custom_domain, keep the default *.cloudfront.net domain working too (a second accepted app host, e.g. when a network blocks the custom domain). Ignored without custom_domain."
+  type        = bool
+  default     = false
+}
+
 variable "invite_links" {
   description = "Invite links (admin-created registration URLs that create accounts with no dataset): TTL and use limits offered to admins, how long expired links stay in the table, and the per-IP limit on the public join form."
   type = object({

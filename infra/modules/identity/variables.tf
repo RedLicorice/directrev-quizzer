@@ -16,6 +16,12 @@ variable "app_domain" {
   type        = string
 }
 
+variable "extra_app_domains" {
+  description = "Additional host names that may serve the app (e.g. the CloudFront domain next to a custom domain); their callback and logout URLs are allowed too."
+  type        = list(string)
+  default     = []
+}
+
 variable "dataset_ids" {
   type = list(string)
   validation {
