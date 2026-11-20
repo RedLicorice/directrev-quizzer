@@ -110,6 +110,7 @@ describe('GET /api/admin/invite-links', () => {
     expect(await status()).toBe('expired');
     item.enabled = false;
     expect(await status()).toBe('disabled');
+    expect((await list(t)).hosts).toEqual(CONFIG.appHosts);
     expect((await list(t)).defaults).toEqual({
       ttlHours: INVITE_LINKS.defaultTtlHours,
       maxTtlHours: INVITE_LINKS.maxTtlHours,

@@ -134,7 +134,7 @@ export interface CampaignPatch {
 }
 
 export const listCampaigns = () =>
-  request<{ links: Campaign[]; defaults: CampaignDefaults }>('/api/admin/invite-links');
+  request<{ links: Campaign[]; hosts: string[]; defaults: CampaignDefaults }>('/api/admin/invite-links');
 
 export const createCampaign = (body: CampaignCreate) =>
   mutate<Campaign>('/api/admin/invite-links', 'POST', body);

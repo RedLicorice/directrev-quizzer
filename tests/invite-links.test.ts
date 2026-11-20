@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateCampaignForm, validateCampaignEdit, editRawFrom, reactivationPatch, toLocalInput,
-  formatRemaining, hasNoAccess, originLabel, MS_PER_HOUR, STATUS_LABEL, STATUS_CLASS,
+  formatRemaining, hasNoAccess, originLabel, linkForHost, MS_PER_HOUR, STATUS_LABEL, STATUS_CLASS,
 } from '../src/aws/admin/inviteLinks';
 import { errorText, AdminApiError } from '../src/aws/admin/adminApi';
 import type { Campaign, CampaignDefaults } from '../src/aws/admin/adminApi';
@@ -95,6 +95,11 @@ describe('labels and access', () => {
     expect(hasNoAccess([])).toBe(true);
     expect(hasNoAccess(['ds-all'])).toBe(false);
   });
+  it('rebuilds the campaign link on another accepted host, keeping path and query', () => {
+    expect(linkForHost('https://quizzer.example.com/auth/join?c=abc', 'd111.cloudfront.net'))
+      .toBe('https://d111.cloudfront.net/auth/join?c=abc');
+  });
+
   it('maps the campaign error codes to Italian text', () => {
     expect(errorText(new AdminApiError(404, 'invite_links_disabled'))).toMatch(/non sono abilitate/);
     expect(errorText(new AdminApiError(400, 'bad_request', 'max_uses_below_uses'))).toMatch(/inferiori/);

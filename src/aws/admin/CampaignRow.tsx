@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Copy, Check, Pencil, Trash2, RotateCcw } from 'lucide-react';
 import type { Campaign, CampaignDefaults, CampaignPatch } from './adminApi';
 import {
-  STATUS_LABEL, STATUS_CLASS, formatDateTime, formatRemaining, copyText, toLocalInput,
+  STATUS_LABEL, STATUS_CLASS, formatDateTime, formatRemaining, copyText, linkForHost, toLocalInput,
   editRawFrom, validateCampaignEdit, reactivationPatch, MS_PER_HOUR,
 } from './inviteLinks';
 
@@ -10,6 +10,8 @@ const LABEL = 'block text-xs font-semibold uppercase tracking-wider text-slate-5
 
 interface Props {
   campaign: Campaign;
+  /** Host the "Copia link" button copies the link for. */
+  host: string;
   defaults: CampaignDefaults;
   busy: boolean;
   onPatch: (id: string, patch: CampaignPatch) => Promise<boolean>;
@@ -18,7 +20,7 @@ interface Props {
 }
 
 /** One campaign: status, always-available "Copia link", expandable edit form, reactivation and delete. */
-export default function CampaignRow({ campaign: c, defaults, busy, onPatch, onDelete, onError }: Props) {
+export default function CampaignRow({ campaign: c, host, defaults, busy, onPatch, onDelete, onError }: Props) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -28,7 +30,7 @@ export default function CampaignRow({ campaign: c, defaults, busy, onPatch, onDe
   const set = <K extends keyof typeof raw>(k: K, v: (typeof raw)[K]) => setRaw((r) => ({ ...r, [k]: v }));
 
   async function copy() {
-    if (await copyText(c.url)) {
+    if (await copyText(linkForHost(c.url, host))) {
       setCopied(true);
       return;
     }

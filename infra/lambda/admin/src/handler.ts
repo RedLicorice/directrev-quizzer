@@ -524,6 +524,7 @@ export function createHandler(deps: Deps) {
             const items = (await deps.invites.list()).sort((a, b) => b.createdAt - a.createdAt);
             return json(200, {
               links: items.map((i) => publicCampaign(i, nowMs, appHost)),
+              hosts: cfg.appHosts, // every host a link can be copied for; the first one is the canonical `url`
               defaults: {
                 ttlHours: links.defaultTtlHours,
                 maxTtlHours: links.maxTtlHours,

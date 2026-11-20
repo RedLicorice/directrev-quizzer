@@ -186,3 +186,10 @@ export async function copyText(text: string): Promise<boolean> {
     }
   }
 }
+
+/** The campaign link on another accepted app host (same path and query). */
+export function linkForHost(url: string, host: string): string {
+  const u = new URL(url);
+  u.host = host;
+  return u.toString();
+}

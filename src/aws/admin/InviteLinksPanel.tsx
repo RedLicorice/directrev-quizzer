@@ -11,6 +11,8 @@ const LABEL = 'block text-xs font-semibold uppercase tracking-wider text-slate-5
 export default function InviteLinksPanel() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [defaults, setDefaults] = useState<CampaignDefaults | null>(null);
+  const [hosts, setHosts] = useState<string[]>([]);
+  const [host, setHost] = useState('');
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [ttlHours, setTtlHours] = useState('');
@@ -26,6 +28,8 @@ export default function InviteLinksPanel() {
       const r = await listCampaigns();
       setCampaigns(r.links);
       setDefaults(r.defaults);
+      setHosts(r.hosts);
+      setHost((h) => (r.hosts.includes(h) ? h : r.hosts[0] ?? ''));
       if (resetForm) {
         setTtlHours(String(r.defaults.ttlHours));
         setMaxUses(String(r.defaults.maxUses));
@@ -109,11 +113,24 @@ export default function InviteLinksPanel() {
       {error && <p className="mt-3 text-sm text-rose-400">{error}</p>}
 
       <p className={`${LABEL} mt-5`}>Campagne</p>
+      {hosts.length > 1 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <span>Copia il link per:</span>
+          <div role="group" aria-label="Host del link" className="inline-flex rounded-lg overflow-hidden border border-slate-700/60">
+            {hosts.map((h) => (
+              <button key={h} type="button" aria-pressed={h === host} onClick={() => setHost(h)}
+                className={`px-2.5 py-1 font-mono ${h === host ? 'bg-amber-500 text-slate-900' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}>
+                {h}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="rounded-lg border border-slate-700/60 divide-y divide-slate-700/30">
         {campaigns.length === 0 || !defaults ? (
           <p className="p-4 text-center text-sm text-slate-500">Nessuna campagna.</p>
         ) : campaigns.map((c) => (
-          <CampaignRow key={c.id} campaign={c} defaults={defaults} busy={busy}
+          <CampaignRow key={c.id} campaign={c} host={host} defaults={defaults} busy={busy}
             onPatch={patch} onDelete={remove} onError={setError} />
         ))}
       </div>
