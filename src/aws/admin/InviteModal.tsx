@@ -11,7 +11,7 @@ interface Props {
   onDone: () => void;
 }
 
-/** Modal to invite a user: by e-mail (Cognito AdminCreateUser, with groups) or through a registration link. */
+/** Modal to invite a user: by e-mail (Cognito AdminCreateUser, with groups) or through a registration link (campaign). */
 export default function InviteModal({ datasets, onClose, onDone }: Props) {
   const [mode, setMode] = useState<'email' | 'link'>('email');
   const [email, setEmail] = useState('');
@@ -58,7 +58,7 @@ export default function InviteModal({ datasets, onClose, onDone }: Props) {
         </div>
 
         <div className="flex gap-2 mb-4">
-          {([['email', 'E-mail', Mail], ['link', 'Link di invito', Link2]] as const).map(([m, label, Icon]) => (
+          {([['email', 'E-mail', Mail], ['link', 'Campagne', Link2]] as const).map(([m, label, Icon]) => (
             <button
               key={m}
               type="button"

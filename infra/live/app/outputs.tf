@@ -61,8 +61,13 @@ output "admin_function_name" {
 }
 
 output "invite_links_table" {
-  description = "DynamoDB table of the invite links."
+  description = "DynamoDB table of the campaigns (invite links)."
   value       = module.lambdas.invite_links_table_name
+}
+
+output "user_origin_table" {
+  description = "DynamoDB table with the campaign each self-registered user came from."
+  value       = module.lambdas.user_origin_table_name
 }
 
 output "config_parameter" {

@@ -10,11 +10,12 @@ locals {
   log_group_arn              = "arn:aws:logs:${var.region}:${var.account_id}:log-group:/aws/lambda/${local.function_name}"
 }
 
-# ── invite links: registration URLs created by admins, redeemed by the auth Lambda ──────────
-# Only sha256(token) is stored (hash key `id`); items expire through the TTL attribute `ttl`.
+# ── campaigns (formerly invite links): reusable registration URLs created by admins ────────
+# Hash key `id` is a stable public campaign id (not a secret); items are never expired by DynamoDB
+# (an expired campaign can be reactivated), so the TTL setting stays declared but no item carries `ttl`.
 resource "aws_dynamodb_table" "invite_links" {
-  #checkov:skip=CKV_AWS_28:no point-in-time recovery: links are short-lived and can simply be issued again
-  #checkov:skip=CKV_AWS_119:SSE uses the AWS managed key (no per-key cost); a customer managed KMS key would add cost for hashes of expiring links
+  #checkov:skip=CKV_AWS_28:no point-in-time recovery: a campaign can simply be created again
+  #checkov:skip=CKV_AWS_119:SSE uses the AWS managed key (no per-key cost); a customer managed KMS key would add cost for non-secret campaign records
   #checkov:skip=CKV2_AWS_16:no auto scaling: the table is PAY_PER_REQUEST
   name         = "${var.name_prefix}-invite-links"
   billing_mode = "PAY_PER_REQUEST"
@@ -28,6 +29,27 @@ resource "aws_dynamodb_table" "invite_links" {
   ttl {
     attribute_name = "ttl"
     enabled        = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+}
+
+# Which campaign each self-registered user came from. Hash key = the Cognito `Username`. No item
+# means "invited" (created by an admin). The campaign name is a snapshot, so it survives a rename
+# or the deletion of the campaign. Written by the auth Lambda, read by the admin Lambda.
+resource "aws_dynamodb_table" "user_origin" {
+  #checkov:skip=CKV_AWS_28:no point-in-time recovery: the origin is informative and can be rebuilt by hand
+  #checkov:skip=CKV_AWS_119:SSE uses the AWS managed key (no per-key cost); a customer managed KMS key would add cost for non-secret records
+  #checkov:skip=CKV2_AWS_16:no auto scaling: the table is PAY_PER_REQUEST
+  name         = "${var.name_prefix}-user-origin"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "username"
+
+  attribute {
+    name = "username"
+    type = "S"
   }
 
   server_side_encryption {
@@ -82,6 +104,12 @@ locals {
         Effect   = "Allow"
         Action   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
         Resource = [aws_dynamodb_table.invite_links.arn]
+      },
+      {
+        Sid      = "UserOrigin"
+        Effect   = "Allow"
+        Action   = ["dynamodb:PutItem"]
+        Resource = [aws_dynamodb_table.user_origin.arn]
       },
       {
         # Same cycle as the admin Lambda below: user pool -> (callback URL of the) site distribution
@@ -254,8 +282,14 @@ locals {
       {
         Sid      = "InviteLinks"
         Effect   = "Allow"
-        Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Scan"]
+        Action   = ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Scan"]
         Resource = [aws_dynamodb_table.invite_links.arn]
+      },
+      {
+        Sid      = "UserOrigin"
+        Effect   = "Allow"
+        Action   = ["dynamodb:BatchGetItem", "dynamodb:GetItem"]
+        Resource = [aws_dynamodb_table.user_origin.arn]
       },
     ]
   }

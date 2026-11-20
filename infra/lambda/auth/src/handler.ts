@@ -32,7 +32,8 @@ import {
   loginErrorPage,
   notEnabledPage,
 } from './html.js';
-import { INVITE_TOKEN_RE, hashToken, inviteStatus, type InviteStore } from './inviteStore.js';
+import { CAMPAIGN_ID_RE, campaignStatus, type CampaignItem, type CampaignStore } from './inviteStore.js';
+import type { OriginStore } from './originStore.js';
 import type { AccountCreator } from './accounts.js';
 import type { Limiter } from './limiter.js';
 import { EMAIL_RE, isSameOrigin, rawBody } from './request.js';
@@ -62,7 +63,8 @@ export interface Deps {
   nowMs(): number;
   random(n: number): Buffer;
   log(entry: Record<string, unknown>): void;
-  invites: InviteStore;
+  invites: CampaignStore;
+  origins: OriginStore;
   accounts: AccountCreator;
   limiter: Limiter;
 }
@@ -288,11 +290,19 @@ export function createHandler(deps: Deps) {
         const links = cfg.inviteLinks;
         if (!links) return json(404, { error: 'invite_links_disabled' });
 
+        // The page of a campaign: logo, name, the shared description and the campaign's public note.
+        const formPage = (item: CampaignItem, email = '', error = '') =>
+          joinFormPage(
+            { campaignId: item.id, name: item.name, description: links.joinDescription, ...(item.publicNote ? { publicNote: item.publicNote } : {}) },
+            email,
+            error,
+          );
+
         if (method === 'GET' || method === 'HEAD') {
-          const token = q.t ?? '';
-          const item = INVITE_TOKEN_RE.test(token) ? await deps.invites.get(hashToken(token)) : null;
-          if (!item || inviteStatus(item, deps.nowMs()) !== 'active') return joinHtml(410, joinInvalidPage());
-          return joinHtml(200, joinFormPage(token));
+          const cid = q.c ?? '';
+          const item = CAMPAIGN_ID_RE.test(cid) ? await deps.invites.get(cid) : null;
+          if (!item || campaignStatus(item, deps.nowMs()) !== 'active') return joinHtml(410, joinInvalidPage());
+          return joinHtml(200, formPage(item));
         }
 
         if (method !== 'POST') {
@@ -311,18 +321,18 @@ export function createHandler(deps: Deps) {
         const raw = rawBody(ev, MAX_JOIN_BODY);
         if (raw === null) return json(413, { error: 'too_large' });
         const form = new URLSearchParams(raw);
-        const token = form.get('t') ?? '';
+        const cid = form.get('c') ?? '';
         const email = (form.get('email') ?? '').trim();
         const password = form.get('password') ?? '';
         const password2 = form.get('password2') ?? '';
 
-        const id = INVITE_TOKEN_RE.test(token) ? hashToken(token) : null;
+        const id = CAMPAIGN_ID_RE.test(cid) ? cid : null;
         const item = id ? await deps.invites.get(id) : null;
-        if (!id || !item || inviteStatus(item, deps.nowMs()) !== 'active') {
+        if (!id || !item || campaignStatus(item, deps.nowMs()) !== 'active') {
           deps.log({ evt: 'join', ip, ...(id ? { id } : {}), result: 'invalid_link' });
           return joinHtml(410, joinInvalidPage());
         }
-        const again = (error: string, status = 400) => joinHtml(status, joinFormPage(token, email, error));
+        const again = (error: string, status = 400) => joinHtml(status, formPage(item, email, error));
         if (!EMAIL_RE.test(email) || email.length > 254) {
           deps.log({ evt: 'join', ip, id, result: 'bad_email' });
           return again('Inserisci un indirizzo email valido.');
@@ -331,12 +341,14 @@ export function createHandler(deps: Deps) {
           deps.log({ evt: 'join', ip, id, result: 'password_mismatch' });
           return again('Le due password non coincidono.');
         }
-        if (!(await deps.invites.redeem(id, deps.nowMs()))) {
+        const redeemed = await deps.invites.redeem(id, deps.nowMs());
+        if (!redeemed) {
           deps.log({ evt: 'join', ip, id, result: 'invalid_link' });
           return joinHtml(410, joinInvalidPage());
         }
+        let username: string;
         try {
-          await deps.accounts.create(email, password);
+          username = await deps.accounts.create(email, password);
         } catch (e) {
           await deps.invites.release(id);
           const name = e instanceof Error ? e.name : 'unknown';
@@ -353,7 +365,14 @@ export function createHandler(deps: Deps) {
           deps.log({ evt: 'join', ip, id, result: 'error', error: name });
           return joinHtml(500, joinErrorPage());
         }
-        deps.log({ evt: 'join', ip, id, result: 'ok' });
+        // The origin is informative: a failed write is logged and never fails the registration.
+        let origin = 'written';
+        try {
+          await deps.origins.put({ username, campaignId: id, campaignName: redeemed.name, at: deps.nowMs() });
+        } catch {
+          origin = 'write_failed';
+        }
+        deps.log({ evt: 'join', ip, id, result: 'ok', origin });
         return joinHtml(200, joinDonePage());
       }
 

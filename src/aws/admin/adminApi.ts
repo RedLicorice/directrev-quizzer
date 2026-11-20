@@ -10,7 +10,11 @@ export interface AdminUser {
   status: string; // CONFIRMED | FORCE_CHANGE_PASSWORD | RESET_REQUIRED | ...
   enabled: boolean;
   groups: string[];
+  /** How the user got their account; absent on old servers (treated as invited). */
+  origin?: UserOrigin;
 }
+
+export type UserOrigin = { kind: 'invited' } | { kind: 'campaign'; campaignId: string; name: string };
 
 export interface AdminOverview {
   datasets: string[];
@@ -80,46 +84,66 @@ export const signOutUser = (key: string) => mutate(`/api/admin/users/${key}/sign
 export const resetUserPassword = (key: string) => mutate(`/api/admin/users/${key}/reset`, 'POST');
 export const deleteUser = (key: string) => mutate(`/api/admin/users/${key}`, 'DELETE');
 
-// ── invite links ──────────────────────────────────────────────────────────────
+// ── campaigns (reusable registration links; endpoint kept as /invite-links) ────
 
-export type InviteLinkStatus = 'active' | 'expired' | 'exhausted' | 'revoked';
+export type CampaignStatus = 'active' | 'disabled' | 'expired' | 'exhausted';
 
-export interface InviteLink {
+export interface Campaign {
   id: string;
-  note?: string;
+  url: string; // not a secret: always available
+  name: string;
+  publicNote?: string; // shown on the public join page
+  internalNote?: string; // admins only
   createdBy: string;
   createdAt: number; // epoch ms
+  updatedAt: number; // epoch ms
   expiresAt: number; // epoch ms
   maxUses: number;
   uses: number;
-  status: InviteLinkStatus;
+  enabled: boolean;
+  status: CampaignStatus;
 }
 
-/** Server-provided form defaults and upper bounds (never hard-coded in the UI). */
-export interface InviteLinkDefaults {
+/** Server-provided form defaults and limits (never hard-coded in the UI). */
+export interface CampaignDefaults {
   ttlHours: number;
   maxTtlHours: number;
   maxUses: number;
   maxMaxUses: number;
+  nameMaxLength: number;
+  publicNoteMaxLength: number;
+  internalNoteMaxLength: number;
 }
 
-export interface CreatedInviteLink {
-  id: string;
-  url: string; // contains the token: shown once
-  expiresAt: number;
+export interface CampaignCreate {
+  name: string;
+  ttlHours: number;
   maxUses: number;
+  publicNote?: string;
+  internalNote?: string;
 }
 
-export interface InviteLinkRequest { ttlHours: number; maxUses: number; note?: string }
+/** Any subset; an empty string for a note removes it; expiresAt is an absolute epoch ms. */
+export interface CampaignPatch {
+  name?: string;
+  publicNote?: string;
+  internalNote?: string;
+  maxUses?: number;
+  enabled?: boolean;
+  expiresAt?: number;
+}
 
-export const listInviteLinks = () =>
-  request<{ links: InviteLink[]; defaults: InviteLinkDefaults }>('/api/admin/invite-links');
+export const listCampaigns = () =>
+  request<{ links: Campaign[]; defaults: CampaignDefaults }>('/api/admin/invite-links');
 
-export const createInviteLink = (body: InviteLinkRequest) =>
-  mutate<CreatedInviteLink>('/api/admin/invite-links', 'POST', body);
+export const createCampaign = (body: CampaignCreate) =>
+  mutate<Campaign>('/api/admin/invite-links', 'POST', body);
 
-export const revokeInviteLink = (id: string) =>
-  mutate<{ id: string; status: 'revoked' }>(`/api/admin/invite-links/${id}`, 'DELETE');
+export const updateCampaign = (id: string, patch: CampaignPatch) =>
+  mutate<Campaign>(`/api/admin/invite-links/${id}`, 'PATCH', patch);
+
+export const deleteCampaign = (id: string) =>
+  mutate<{ id: string; deleted: true }>(`/api/admin/invite-links/${id}`, 'DELETE');
 
 // ── dataset editing (admin, M7/P1) ────────────────────────────────────────────
 
@@ -172,8 +196,11 @@ export function errorText(e: unknown): string {
       case 'mcd_confirmation_required': return 'Conferma esplicitamente l’accesso a mule-mcd-01.';
       case 'rate_limited': return 'Troppe operazioni: riprova più tardi.';
       case 'not_found': return 'Elemento non trovato.';
-      case 'invite_links_disabled': return 'I link di invito non sono abilitati su questo ambiente.';
-      case 'bad_request': return e.reason ? `Richiesta non valida (${e.reason}).` : 'Richiesta non valida: controlla i valori inseriti.';
+      case 'invite_links_disabled': return 'Le campagne non sono abilitate su questo ambiente.';
+      case 'bad_request':
+        if (e.reason === 'max_uses_below_uses') return 'Gli utilizzi massimi non possono essere inferiori agli utilizzi già fatti.';
+        if (e.reason === 'expires_at') return 'La scadenza deve essere futura e non oltre il limite massimo di validità.';
+        return e.reason ? `Richiesta non valida (${e.reason}).` : 'Richiesta non valida: controlla i valori inseriti.';
       case 'dataset_not_editable': return 'Questo dataset non è modificabile da qui (serve un repo GitHub configurato).';
       case 'conflict': return 'Il dataset è cambiato nel frattempo: ricarica la domanda e riapplica le modifiche.';
       case 'too_large': return 'La domanda è troppo grande.';

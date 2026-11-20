@@ -10,7 +10,7 @@
 // `x-qz-csrf: 1` header and (enforced by CloudFront OAC, not here) `x-amz-content-sha256`.
 // Every mutation is written to CloudWatch Logs as a structured `admin_action` record
 // before the response is sent; there is no DynamoDB (plan v3 delta 5).
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import { checkToken, parseToken, SESSION_COOKIE } from '../../../edge/session-core.js';
 import type { SessionClaims } from '../../../edge/session-core.js';
 import type { Config } from '../../auth/src/config.js';
@@ -18,7 +18,16 @@ import type { KeyStore } from '../../auth/src/keys.js';
 import { getCookie } from '../../auth/src/cookies.js';
 import { EMAIL_RE, isSameOrigin, rawBody } from '../../auth/src/request.js';
 import type { Limiter } from '../../auth/src/limiter.js';
-import { INVITE_ID_RE, hashToken, inviteStatus, type InviteItem, type InviteStore } from '../../auth/src/inviteStore.js';
+import type { InviteLinksConfig } from '../../auth/src/config.js';
+import {
+  CAMPAIGN_ID_RE,
+  campaignStatus,
+  newCampaignId,
+  type CampaignChanges,
+  type CampaignItem,
+  type CampaignStore,
+} from '../../auth/src/inviteStore.js';
+import type { Origin, OriginStore } from '../../auth/src/originStore.js';
 import { GithubError, type CommitFile, type GithubClient } from './github.js';
 import { IMAGE_PATH_RE, decodeUploads, imageName } from './images.js';
 import { detectJsonStyle, parseJsonText } from './jsonStyle.js';
@@ -85,7 +94,8 @@ export interface Deps {
   nowMs(): number;
   log(entry: Record<string, unknown>): void;
   limiter: Limiter;
-  invites: InviteStore;
+  invites: CampaignStore;
+  origins: OriginStore;
 }
 
 export const hmac = (key: string, data: string) => createHmac('sha256', key).update(data).digest('base64url');
@@ -102,7 +112,7 @@ const MAX_EDIT_BODY = 5_200_000;
 
 const MUTATIONS_PER_HOUR = 30;
 const INVITES_PER_DAY = 20;
-const NOTE_MAX = 80;
+const HOUR_MS = 3_600_000;
 
 function json(statusCode: number, body: unknown, allow?: string): UrlResult {
   return {
@@ -174,7 +184,7 @@ function summarize(users: AdminUser[]) {
   return { total: users.length, confirmed, pending, disabled };
 }
 
-function publicUser(u: AdminUser) {
+function publicUser(u: AdminUser, origin: Origin) {
   return {
     key: encodeUid(u.username),
     email: u.email,
@@ -182,19 +192,25 @@ function publicUser(u: AdminUser) {
     status: u.status,
     enabled: u.enabled,
     groups: [...u.groups].sort(),
+    origin,
   };
 }
 
-function publicLink(item: InviteItem, nowMs: number) {
+function publicCampaign(item: CampaignItem, nowMs: number, appHost: string) {
   return {
     id: item.id,
-    ...(item.note ? { note: item.note } : {}),
+    url: `https://${appHost}/auth/join?c=${item.id}`,
+    name: item.name,
+    ...(item.publicNote ? { publicNote: item.publicNote } : {}),
+    ...(item.internalNote ? { internalNote: item.internalNote } : {}),
     createdBy: item.createdBy,
     createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
     expiresAt: item.expiresAt,
     maxUses: item.maxUses,
     uses: item.uses,
-    status: inviteStatus(item, nowMs),
+    enabled: item.enabled,
+    status: campaignStatus(item, nowMs),
   };
 }
 
@@ -202,6 +218,52 @@ function publicLink(item: InviteItem, nowMs: number) {
 function boundedInt(v: unknown, fallback: number, max: number): number | null {
   if (v === undefined) return fallback;
   return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= max ? v : null;
+}
+
+const CONTROL_CHARS_RE = /[\x00-\x1f\x7f]/;
+// Notes are free text: line breaks and tabs are fine, any other control character is not.
+const NOTE_CONTROL_CHARS_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+
+/** Trimmed text within `max` characters, or null. A name is a single line; a note may have line breaks. */
+function boundedText(v: unknown, max: number, multiline: boolean): string | null {
+  if (typeof v !== 'string') return null;
+  const text = v.trim();
+  if (text.length > max || (multiline ? NOTE_CONTROL_CHARS_RE : CONTROL_CHARS_RE).test(text)) return null;
+  return text;
+}
+
+const CAMPAIGN_FIELDS = ['name', 'publicNote', 'internalNote', 'maxUses', 'enabled', 'expiresAt'] as const;
+
+/** Validated changes of a PATCH body, or the 400 `reason`. */
+function parseCampaignChanges(body: Record<string, unknown>, links: InviteLinksConfig, nowMs: number): CampaignChanges | string {
+  const changes: CampaignChanges = {};
+  for (const key of Object.keys(body)) if (!(CAMPAIGN_FIELDS as readonly string[]).includes(key)) return key;
+  if (body.name !== undefined) {
+    const name = boundedText(body.name, links.nameMaxLength, false);
+    if (!name) return 'name';
+    changes.name = name;
+  }
+  for (const [field, max] of [['publicNote', links.publicNoteMaxLength], ['internalNote', links.internalNoteMaxLength]] as const) {
+    if (body[field] === undefined) continue;
+    const note = boundedText(body[field], max, true);
+    if (note === null) return field;
+    changes[field] = note || null; // empty removes the note
+  }
+  if (body.maxUses !== undefined) {
+    const maxUses = boundedInt(body.maxUses, 0, links.maxMaxUses);
+    if (maxUses === null) return 'maxUses';
+    changes.maxUses = maxUses;
+  }
+  if (body.enabled !== undefined) {
+    if (typeof body.enabled !== 'boolean') return 'enabled';
+    changes.enabled = body.enabled;
+  }
+  if (body.expiresAt !== undefined) {
+    const at = body.expiresAt;
+    if (typeof at !== 'number' || !Number.isInteger(at) || at <= nowMs || at > nowMs + links.maxTtlHours * HOUR_MS) return 'expires_at';
+    changes.expiresAt = at;
+  }
+  return Object.keys(changes).length > 0 ? changes : 'empty';
 }
 
 /** Structural validation shared by the editor route and its tests. */
@@ -291,6 +353,16 @@ export function createHandler(deps: Deps) {
     return admin;
   }
 
+  // Origins are informative: if the table cannot be read the list still loads, everyone as "invited".
+  async function readOrigins(usernames: string[]) {
+    try {
+      return await deps.origins.getMany(usernames);
+    } catch (e) {
+      deps.log({ evt: 'origin_read_failed', error: e instanceof Error ? e.name : String(e) });
+      return new Map<string, { campaignId: string; campaignName: string }>();
+    }
+  }
+
   return async function handler(ev: UrlEvent): Promise<UrlResult> {
     const method = ev.requestContext.http.method.toUpperCase();
     const path = ev.rawPath;
@@ -353,7 +425,13 @@ export function createHandler(deps: Deps) {
             ? users.filter((u) => u.email.toLowerCase().includes(filter) || u.username.toLowerCase().includes(filter))
             : users;
           filtered.sort((a, b) => a.email.localeCompare(b.email));
-          return json(200, { users: filtered.map(publicUser) });
+          const origins = await readOrigins(cfg.inviteLinks ? filtered.map((u) => u.username) : []);
+          return json(200, {
+            users: filtered.map((u) => {
+              const o = origins.get(u.username);
+              return publicUser(u, o ? { kind: 'campaign', campaignId: o.campaignId, name: o.campaignName } : { kind: 'invited' });
+            }),
+          });
         }
         if (method === 'POST') {
           const body = readBody(ev);
@@ -432,66 +510,89 @@ export function createHandler(deps: Deps) {
         return json(405, { error: 'method_not_allowed' }, 'PUT, POST, DELETE');
       }
 
-      // ── invite links: registration URLs that create accounts without any dataset ─────
+      // ── campaigns: reusable registration links that create accounts without any dataset ─────
       const linkMatch = path.match(/^\/api\/admin\/invite-links(?:\/([^/]*))?$/);
       if (linkMatch) {
         const links = cfg.inviteLinks;
         if (!links) return json(404, { error: 'invite_links_disabled' });
         const linkId = linkMatch[1];
+        const appHost = cfg.appHosts[0]!;
+        const badRequest = (reason: string) => json(400, { error: 'bad_request', reason });
 
         if (linkId === undefined) {
           if (method === 'GET' || method === 'HEAD') {
             const items = (await deps.invites.list()).sort((a, b) => b.createdAt - a.createdAt);
             return json(200, {
-              links: items.map((i) => publicLink(i, nowMs)),
+              links: items.map((i) => publicCampaign(i, nowMs, appHost)),
               defaults: {
                 ttlHours: links.defaultTtlHours,
                 maxTtlHours: links.maxTtlHours,
                 maxUses: links.defaultMaxUses,
                 maxMaxUses: links.maxMaxUses,
+                nameMaxLength: links.nameMaxLength,
+                publicNoteMaxLength: links.publicNoteMaxLength,
+                internalNoteMaxLength: links.internalNoteMaxLength,
               },
             });
           }
           if (method === 'POST') {
             const body = readBody(ev);
-            if (!body) return json(400, { error: 'bad_request', reason: 'body' });
+            if (!body) return badRequest('body');
+            const name = boundedText(body.name, links.nameMaxLength, false);
+            if (!name) return badRequest('name');
             const ttlHours = boundedInt(body.ttlHours, links.defaultTtlHours, links.maxTtlHours);
-            if (ttlHours === null) return json(400, { error: 'bad_request', reason: 'ttlHours' });
+            if (ttlHours === null) return badRequest('ttlHours');
             const maxUses = boundedInt(body.maxUses, links.defaultMaxUses, links.maxMaxUses);
-            if (maxUses === null) return json(400, { error: 'bad_request', reason: 'maxUses' });
-            let note: string | undefined;
-            if (body.note !== undefined) {
-              if (typeof body.note !== 'string') return json(400, { error: 'bad_request', reason: 'note' });
-              const trimmed = body.note.trim();
-              if (trimmed.length > NOTE_MAX || /[\x00-\x1f\x7f]/.test(trimmed)) return json(400, { error: 'bad_request', reason: 'note' });
-              if (trimmed) note = trimmed;
+            if (maxUses === null) return badRequest('maxUses');
+            const notes: { publicNote?: string; internalNote?: string } = {};
+            for (const [field, max] of [['publicNote', links.publicNoteMaxLength], ['internalNote', links.internalNoteMaxLength]] as const) {
+              if (body[field] === undefined) continue;
+              const note = boundedText(body[field], max, true);
+              if (note === null) return badRequest(field);
+              if (note) notes[field] = note;
             }
             if (!limited(`link:${actor}`, INVITES_PER_DAY, 86_400_000)) return json(429, { error: 'rate_limited' });
-            const token = randomBytes(32).toString('base64url');
-            const id = hashToken(token);
-            const expiresAt = nowMs + ttlHours * 3_600_000;
-            await deps.invites.create({
-              id,
+            const item: CampaignItem = {
+              id: newCampaignId(),
+              name,
+              ...notes,
               createdBy: actor,
               createdAt: nowMs,
-              expiresAt,
+              updatedAt: nowMs,
+              expiresAt: nowMs + ttlHours * HOUR_MS,
               maxUses,
               uses: 0,
-              ...(note ? { note } : {}),
-              ttl: Math.floor(expiresAt / 1000) + links.retentionDays * 86_400,
-            });
-            audit('link_create', id, undefined, `ttlHours=${ttlHours} maxUses=${maxUses}`);
-            return json(201, { id, url: `https://${cfg.appHosts[0]}/auth/join?t=${token}`, expiresAt, maxUses });
+              enabled: true,
+            };
+            await deps.invites.create(item);
+            audit('link_create', item.id, undefined, name);
+            return json(201, publicCampaign(item, nowMs, appHost));
           }
           return json(405, { error: 'method_not_allowed' }, 'GET, POST');
         }
 
-        if (!INVITE_ID_RE.test(linkId)) return json(404, { error: 'not_found' });
-        if (method !== 'DELETE') return json(405, { error: 'method_not_allowed' }, 'DELETE');
-        if (!limited(`mut:${actor}`, MUTATIONS_PER_HOUR, 3_600_000)) return json(429, { error: 'rate_limited' });
-        if (!(await deps.invites.revoke(linkId, nowMs))) return json(404, { error: 'not_found' });
-        audit('link_revoke', linkId);
-        return json(200, { id: linkId, status: 'revoked' });
+        if (!CAMPAIGN_ID_RE.test(linkId)) return json(404, { error: 'not_found' });
+
+        if (method === 'PATCH') {
+          const body = readBody(ev);
+          if (!body) return badRequest('body');
+          const changes = parseCampaignChanges(body, links, nowMs);
+          if (typeof changes === 'string') return badRequest(changes);
+          if (!limited(`mut:${actor}`, MUTATIONS_PER_HOUR, 3_600_000)) return json(429, { error: 'rate_limited' });
+          const out = await deps.invites.update(linkId, changes, nowMs);
+          if (!out.ok) return out.reason === 'not_found' ? json(404, { error: 'not_found' }) : badRequest(out.reason);
+          audit('link_update', linkId, undefined, Object.keys(changes).join(','));
+          return json(200, publicCampaign(out.item, nowMs, appHost));
+        }
+
+        if (method === 'DELETE') {
+          if (!limited(`mut:${actor}`, MUTATIONS_PER_HOUR, 3_600_000)) return json(429, { error: 'rate_limited' });
+          await deps.invites.delete(linkId);
+          audit('link_delete', linkId);
+          return json(200, { id: linkId, deleted: true });
+        }
+
+        return json(405, { error: 'method_not_allowed' }, 'PATCH, DELETE');
       }
 
       // ── dataset editor (P1): read/commit one question in its dataset repo ─────

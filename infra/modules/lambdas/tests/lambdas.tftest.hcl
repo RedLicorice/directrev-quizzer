@@ -7,6 +7,10 @@ mock_provider "aws" {
     values = { arn = "arn:aws:dynamodb:eu-central-1:123456789012:table/quizzer-test-invite-links" }
   }
   override_resource {
+    target = aws_dynamodb_table.user_origin
+    values = { arn = "arn:aws:dynamodb:eu-central-1:123456789012:table/quizzer-test-user-origin" }
+  }
+  override_resource {
     target = aws_lambda_function.auth
     values = { arn = "arn:aws:lambda:eu-central-1:123456789012:function:quizzer-test-auth" }
   }
@@ -105,17 +109,18 @@ run "least_privilege" {
       { Sid = "ReadConfig", Effect = "Allow", Action = ["ssm:GetParameter"], Resource = ["arn:aws:ssm:eu-central-1:123456789012:parameter/quizzer/prod/config"] },
       { Sid = "ReadSessionKeys", Effect = "Allow", Action = ["cloudfront-keyvaluestore:GetKey", "cloudfront-keyvaluestore:DescribeKeyValueStore"], Resource = ["arn:aws:cloudfront::123456789012:key-value-store/0000-kvs"] },
       { Sid = "InviteLinks", Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:UpdateItem"], Resource = ["arn:aws:dynamodb:eu-central-1:123456789012:table/quizzer-test-invite-links"] },
+      { Sid = "UserOrigin", Effect = "Allow", Action = ["dynamodb:PutItem"], Resource = ["arn:aws:dynamodb:eu-central-1:123456789012:table/quizzer-test-user-origin"] },
       { Sid = "CognitoSelfRegistration", Effect = "Allow", Action = ["cognito-idp:AdminCreateUser", "cognito-idp:AdminSetUserPassword"], Resource = ["arn:aws:cognito-idp:eu-central-1:123456789012:userpool/*"] },
     ]
-    error_message = "auth Lambda policy: logs, one SSM parameter, the KVS, read/redeem on the invite table, account creation. Nothing else."
+    error_message = "auth Lambda policy: logs, one SSM parameter, the KVS, read/redeem on the campaign table, PutItem on the user-origin table, account creation. Nothing else."
   }
   assert {
     condition     = jsondecode(aws_iam_role.auth.assume_role_policy).Statement[0].Principal == { Service = "lambda.amazonaws.com" }
     error_message = "Only Lambda can assume the role."
   }
   assert {
-    condition     = [for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s.Sid] == ["Logs", "ReadAuditLogs", "ReadConfig", "ReadGithubToken", "DecryptGithubToken", "ReadSessionKeys", "CognitoUserManagement", "InviteLinks"]
-    error_message = "Admin policy statements: logs (write + audit read), config, GitHub token (+ decrypt), KVS keys, Cognito user management, invite links table."
+    condition     = [for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s.Sid] == ["Logs", "ReadAuditLogs", "ReadConfig", "ReadGithubToken", "DecryptGithubToken", "ReadSessionKeys", "CognitoUserManagement", "InviteLinks", "UserOrigin"]
+    error_message = "Admin policy statements: logs (write + audit read), config, GitHub token (+ decrypt), KVS keys, Cognito user management, campaigns table, user-origin table."
   }
   assert {
     condition     = one([for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s if s.Sid == "CognitoUserManagement"]).Resource == ["arn:aws:cognito-idp:eu-central-1:123456789012:userpool/*"]
@@ -137,7 +142,7 @@ run "invite_links_table" {
   }
   assert {
     condition     = one(aws_dynamodb_table.invite_links.ttl).attribute_name == "ttl" && one(aws_dynamodb_table.invite_links.ttl).enabled
-    error_message = "Items expire through the `ttl` attribute."
+    error_message = "The TTL setting stays declared (campaigns carry no `ttl` attribute, so nothing expires)."
   }
   assert {
     condition     = one(aws_dynamodb_table.invite_links.server_side_encryption).enabled
@@ -149,18 +154,45 @@ run "invite_links_table" {
   }
 }
 
+run "user_origin_table" {
+  command = apply
+  assert {
+    condition = (
+      aws_dynamodb_table.user_origin.name == "quizzer-test-user-origin" &&
+      aws_dynamodb_table.user_origin.billing_mode == "PAY_PER_REQUEST" &&
+      aws_dynamodb_table.user_origin.hash_key == "username" &&
+      one(aws_dynamodb_table.user_origin.attribute).type == "S" &&
+      one(aws_dynamodb_table.user_origin.server_side_encryption).enabled &&
+      length(aws_dynamodb_table.user_origin.ttl) == 0 &&
+      output.user_origin_table_name == "quizzer-test-user-origin"
+    )
+    error_message = "On-demand, encrypted table keyed by `username` (string), no TTL, named <prefix>-user-origin."
+  }
+}
+
 run "invite_links_least_privilege" {
   command = apply
   assert {
-    condition     = one([for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s if s.Sid == "InviteLinks"]).Action == ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Scan"]
-    error_message = "Admin: create, read, revoke and list links; no delete, no other table."
+    condition     = one([for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s if s.Sid == "InviteLinks"]).Action == ["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Scan"]
+    error_message = "Admin: create, read, edit, delete and list campaigns; no other table."
+  }
+  assert {
+    condition     = one([for s in jsondecode(aws_iam_role_policy.admin.policy).Statement : s if s.Sid == "UserOrigin"]).Action == ["dynamodb:BatchGetItem", "dynamodb:GetItem"]
+    error_message = "Admin only reads user origins."
   }
   assert {
     condition = alltrue([
       for p in [aws_iam_role_policy.auth.policy, aws_iam_role_policy.admin.policy] :
       one([for s in jsondecode(p).Statement : s if s.Sid == "InviteLinks"]).Resource == ["arn:aws:dynamodb:eu-central-1:123456789012:table/quizzer-test-invite-links"]
     ])
-    error_message = "Both roles reach only the invite links table ARN (no wildcard, no index)."
+    error_message = "Both roles reach only the campaigns table ARN (no wildcard, no index)."
+  }
+  assert {
+    condition = alltrue([
+      for p in [aws_iam_role_policy.auth.policy, aws_iam_role_policy.admin.policy] :
+      one([for s in jsondecode(p).Statement : s if s.Sid == "UserOrigin"]).Resource == ["arn:aws:dynamodb:eu-central-1:123456789012:table/quizzer-test-user-origin"]
+    ])
+    error_message = "Both roles reach only the user-origin table ARN."
   }
   assert {
     condition     = !contains(flatten([for s in jsondecode(aws_iam_role_policy.auth.policy).Statement : s.Action]), "cognito-idp:AdminAddUserToGroup")

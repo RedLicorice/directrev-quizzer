@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, Send, Power, PowerOff, LogOut, KeyRound, Trash2, AlertTriangle, Save } from 'lucide-react';
 import type { AdminUser } from './adminApi';
 import { setUserGroups, resendInvite, disableUser, enableUser, signOutUser, resetUserPassword, deleteUser, errorText } from './adminApi';
+import { originLabel } from './inviteLinks';
 
 const MCD = 'ds-mule-mcd-01';
 
@@ -94,6 +95,7 @@ export default function UserDetailModal({ user, datasets, onClose, onChanged }: 
             <h2 className="text-base font-semibold truncate" title={user.email}>{user.email}</h2>
             <div className="mt-1 flex items-center gap-2">
               <StatusBadge user={user} />
+              <span className="text-xs text-slate-500">Origine: {originLabel(user.origin)}</span>
             </div>
           </div>
           <button onClick={onClose} className="btn-ghost p-1.5 shrink-0"><X className="w-4 h-4" /></button>

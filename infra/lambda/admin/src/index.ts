@@ -4,7 +4,8 @@ import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { CloudFrontKeyValueStoreClient, GetKeyCommand } from '@aws-sdk/client-cloudfront-keyvaluestore';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { createDynamoInviteStore } from '../../auth/src/inviteStore.js';
+import { createDynamoCampaignStore } from '../../auth/src/inviteStore.js';
+import { createDynamoOriginStore } from '../../auth/src/originStore.js';
 import { createConfigLoader } from '../../auth/src/config.js';
 import { createKeyStore } from '../../auth/src/keys.js';
 import { createCognitoAdmin, createAuditReader } from './aws.js';
@@ -53,6 +54,13 @@ async function getGithubToken(): Promise<string> {
   return value;
 }
 
+const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const inviteLinksConfig = async () => {
+  const links = (await getConfig()).inviteLinks;
+  if (!links) throw new Error('invite links are not configured');
+  return links;
+};
+
 export const handler = createHandler({
   getConfig,
   keys,
@@ -62,9 +70,6 @@ export const handler = createHandler({
   nowMs: Date.now,
   log: (entry) => console.log(JSON.stringify(entry)),
   limiter: createInMemoryLimiter(Date.now),
-  invites: createDynamoInviteStore(DynamoDBDocumentClient.from(new DynamoDBClient({})), async () => {
-    const links = (await getConfig()).inviteLinks;
-    if (!links) throw new Error('invite links are not configured');
-    return links.tableName;
-  }),
+  invites: createDynamoCampaignStore(doc, async () => (await inviteLinksConfig()).tableName),
+  origins: createDynamoOriginStore(doc, async () => (await inviteLinksConfig()).originTableName),
 });

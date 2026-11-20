@@ -116,25 +116,42 @@ variable "also_serve_cloudfront_domain" {
 }
 
 variable "invite_links" {
-  description = "Invite links (admin-created registration URLs that create accounts with no dataset): TTL and use limits offered to admins, how long expired links stay in the table, and the per-IP limit on the public join form."
+  description = "Campaigns (reusable registration URLs that create accounts with no dataset): TTL and use limits offered to admins, text limits, the description shown on the public join page, and the per-IP limit on the join form."
   type = object({
-    default_ttl_hours   = optional(number, 168)
-    max_ttl_hours       = optional(number, 720)
-    default_max_uses    = optional(number, 1)
-    max_max_uses        = optional(number, 50)
-    retention_days      = optional(number, 30)
-    join_attempts       = optional(number, 10)
-    join_window_seconds = optional(number, 600)
+    default_ttl_hours        = optional(number, 168)
+    max_ttl_hours            = optional(number, 720)
+    default_max_uses         = optional(number, 1)
+    max_max_uses             = optional(number, 50)
+    name_max_length          = optional(number, 60)
+    public_note_max_length   = optional(number, 500)
+    internal_note_max_length = optional(number, 200)
+    join_attempts            = optional(number, 10)
+    join_window_seconds      = optional(number, 600)
+    join_description         = optional(string, "Quizzer: allenamento e simulazioni d'esame per le certificazioni cloud e di integrazione. Crea il tuo account per iniziare.")
   })
   default = {}
   validation {
     condition = alltrue([
-      for v in values(var.invite_links) : v >= 1 && v == floor(v)
+      for v in [
+        var.invite_links.default_ttl_hours,
+        var.invite_links.max_ttl_hours,
+        var.invite_links.default_max_uses,
+        var.invite_links.max_max_uses,
+        var.invite_links.name_max_length,
+        var.invite_links.public_note_max_length,
+        var.invite_links.internal_note_max_length,
+        var.invite_links.join_attempts,
+        var.invite_links.join_window_seconds,
+      ] : v >= 1 && v == floor(v)
     ])
-    error_message = "Every invite_links value must be a positive integer."
+    error_message = "Every numeric invite_links value must be a positive integer."
   }
   validation {
     condition     = var.invite_links.default_ttl_hours <= var.invite_links.max_ttl_hours && var.invite_links.default_max_uses <= var.invite_links.max_max_uses
     error_message = "invite_links defaults must not exceed their maximums."
+  }
+  validation {
+    condition     = length(trimspace(var.invite_links.join_description)) > 0
+    error_message = "invite_links.join_description must not be empty."
   }
 }

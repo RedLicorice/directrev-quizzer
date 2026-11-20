@@ -35,7 +35,7 @@ describe('authorization layers', () => {
     expect(r.statusCode).toBe(200);
     const key = Buffer.from(ADMIN_EMAIL).toString('base64url');
     expect(JSON.parse(r.body!)).toEqual({
-      users: [{ key, email: ADMIN_EMAIL, status: 'CONFIRMED', enabled: true, groups: ['admin', 'ds-all'] }],
+      users: [{ key, email: ADMIN_EMAIL, status: 'CONFIRMED', enabled: true, groups: ['admin', 'ds-all'], origin: { kind: 'invited' } }],
     });
   });
 });

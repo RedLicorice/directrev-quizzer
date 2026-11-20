@@ -29,3 +29,7 @@ output "admin_function_url" {
 output "invite_links_table_name" {
   value = aws_dynamodb_table.invite_links.name
 }
+
+output "user_origin_table_name" {
+  value = aws_dynamodb_table.user_origin.name
+}

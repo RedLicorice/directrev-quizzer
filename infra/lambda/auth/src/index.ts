@@ -10,7 +10,8 @@ import { createKeyStore } from './keys.js';
 import { createHandler } from './handler.js';
 import type { Fetch } from './cognito.js';
 import { createAccountCreator } from './accounts.js';
-import { createDynamoInviteStore } from './inviteStore.js';
+import { createDynamoCampaignStore } from './inviteStore.js';
+import { createDynamoOriginStore } from './originStore.js';
 import { createInMemoryLimiter } from './limiter.js';
 
 const CONFIG_PARAMETER = process.env.CONFIG_PARAMETER ?? '';
@@ -39,11 +40,12 @@ const keys = createKeyStore(async (key) => {
   }
 }, Date.now);
 
-const inviteTable = async () => {
+const inviteTables = async () => {
   const links = (await getConfig()).inviteLinks;
   if (!links) throw new Error('invite links are not configured');
-  return links.tableName;
+  return links;
 };
+const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 export const handler = createHandler({
   getConfig,
@@ -52,7 +54,8 @@ export const handler = createHandler({
   nowMs: Date.now,
   random: (n) => randomBytes(n),
   log: (entry) => console.log(JSON.stringify(entry)),
-  invites: createDynamoInviteStore(DynamoDBDocumentClient.from(new DynamoDBClient({})), inviteTable),
+  invites: createDynamoCampaignStore(doc, async () => (await inviteTables()).tableName),
+  origins: createDynamoOriginStore(doc, async () => (await inviteTables()).originTableName),
   accounts: createAccountCreator(async () => (await getConfig()).userPoolId),
   limiter: createInMemoryLimiter(Date.now),
 });

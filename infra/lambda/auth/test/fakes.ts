@@ -7,7 +7,7 @@ import { createConfigLoader } from '../src/config.js';
 import { createKeyStore } from '../src/keys.js';
 import { createHandler, type UrlEvent } from '../src/handler.js';
 import { createInMemoryLimiter } from '../src/limiter.js';
-import { FakeAccounts, FakeInviteStore, INVITE_LINKS } from './fakeInvites.js';
+import { FakeAccounts, FakeCampaignStore, FakeOriginStore, INVITE_LINKS } from './fakeInvites.js';
 
 export const CONFIG: Config = {
   userPoolId: 'eu-central-1_TESTPOOL',
@@ -130,7 +130,8 @@ export function setup(opts: { kvs?: Record<string, string>; config?: Partial<Con
     counters.kvs++;
     return Object.prototype.hasOwnProperty.call(kvs, k) ? kvs[k]! : null;
   }, () => nowMs);
-  const invites = new FakeInviteStore();
+  const invites = new FakeCampaignStore();
+  const origins = new FakeOriginStore();
   const accounts = new FakeAccounts();
   const handler = createHandler({
     getConfig,
@@ -140,11 +141,13 @@ export function setup(opts: { kvs?: Record<string, string>; config?: Partial<Con
     random: (n) => randomBytes(n),
     log: (e) => logs.push(e),
     invites,
+    origins,
     accounts,
     limiter: createInMemoryLimiter(() => nowMs),
   });
   return {
     invites,
+    origins,
     accounts,
     cognito,
     kvs,

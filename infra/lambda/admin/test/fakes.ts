@@ -4,7 +4,7 @@ import { createHmac } from 'node:crypto';
 import { signSession } from '../../../edge/session-core.js';
 import { createKeyStore } from '../../auth/src/keys.js';
 import type { Config } from '../../auth/src/config.js';
-import { FakeInviteStore, INVITE_LINKS } from '../../auth/test/fakeInvites.js';
+import { FakeCampaignStore, FakeOriginStore, INVITE_LINKS } from '../../auth/test/fakeInvites.js';
 import { GithubError, type CommitInput, type GithubClient } from '../src/github.js';
 import {
   createHandler,
@@ -155,7 +155,8 @@ export class FakeGithub implements GithubClient {
 
 export function setup(opts: { limiter?: Limiter; config?: Partial<Config> } = {}) {
   const cognito = new FakeCognito();
-  const invites = new FakeInviteStore();
+  const invites = new FakeCampaignStore();
+  const origins = new FakeOriginStore();
   const github = new FakeGithub();
   const logs: Record<string, unknown>[] = [];
   const audit: AuditEntry[] = [];
@@ -175,9 +176,11 @@ export function setup(opts: { limiter?: Limiter; config?: Partial<Config> } = {}
     },
     limiter: opts.limiter ?? (() => true),
     invites,
+    origins,
   });
   return {
     invites,
+    origins,
     cognito,
     github,
     logs,

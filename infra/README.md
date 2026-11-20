@@ -8,7 +8,7 @@ Architettura (piano v2 + delta v3): una distribuzione CloudFront sul dominio di 
 bucket S3 privati (app e dati) dietro OAC, una CloudFront Function `session-check` che verifica il cookie di sessione
 con una chiave HMAC presa dal KeyValueStore (KVS), una Lambda `auth` (Function URL con OAC) che fa il login con
 Cognito (codice + PKCE), una user pool Cognito solo su invito con MFA TOTP opzionale, i ruoli OIDC per GitHub Actions
-e un budget da 5 USD. Niente API, niente passkey; DynamoDB solo per i link di invito ([§9](#link-di-invito)). Il dominio custom (Cloudflare) è opzionale:
+e un budget da 5 USD. Niente API, niente passkey; DynamoDB solo per le campagne (link di invito) e l'origine degli utenti ([§9](#link-di-invito)). Il dominio custom (Cloudflare) è opzionale:
 senza `custom_domain` resta il dominio di default `dXXXX.cloudfront.net`.
 
 Il contratto tra edge, Lambda e app (cookie, claim, endpoint, vettori di test) è in [`CONTRACT.md`](CONTRACT.md).
@@ -275,52 +275,61 @@ con le ultime azioni. La logica sta nella Lambda `admin` dietro `/api/admin/*`; 
   chiave stabile usata da stats, note e cronologia.
 - Gli script `invite-user.sh` / `offboard-user.sh` restano per il **bootstrap** (primo admin, emergenze da CLI).
 
-### Link di invito
+### Link di invito (campagne)
 
-Un admin crea nel pannello (sezione "Link di invito") un URL `https://<host-app>/auth/join?t=<token>` e lo manda a chi
-vuole. Chi lo apre sceglie email e password e l'account viene creato subito: **nessuna e-mail parte** da Cognito. Il
-link **non abilita nessun dataset**: il nuovo utente vede "Accesso non abilitato" finché un admin non gli assegna i
-gruppi dal dettaglio utente (come per un account normale senza gruppi). Contratto: [`CONTRACT.md`](CONTRACT.md) §5.2.
+Un admin crea nel pannello (sezione "Link di invito") una **campagna**: un URL `https://<host-app>/auth/join?c=<id>` da
+mandare a chi vuole. Il link **non è un segreto**: l'admin può sempre ricopiarlo, modificarlo, spegnerlo, prorogarlo ed
+eliminarlo. Chi lo apre vede il logo dell'app, una breve descrizione e la nota pubblica scritta nella campagna, poi sceglie
+email e password; l'account viene creato subito e **nessuna e-mail parte** da Cognito. La campagna **non abilita nessun
+dataset**: il nuovo utente vede "Accesso non abilitato" finché un admin non gli assegna i gruppi dal dettaglio utente.
+Contratto: [`CONTRACT.md`](CONTRACT.md) §5.2.
 
-- **Flusso**: `GET /auth/join?t=` mostra il modulo (solo se il link è attivo); `POST /auth/join` prende un uso del link
-  in modo atomico (DynamoDB, scrittura condizionata), poi `AdminCreateUser` (`MessageAction=SUPPRESS`, `email_verified=true`,
+- **Origine utente**: ogni utente ha un'origine, mostrata nell'elenco admin: la campagna da cui si è registrato oppure
+  "invitato" (creato da un admin, anche tutti gli utenti precedenti alle campagne). Sta nella tabella
+  `quizzer-<env>-user-origin` (chiave = `Username` Cognito) con il **nome della campagna copiato al momento della
+  registrazione**: sopravvive a rinomina ed eliminazione della campagna. Se la scrittura fallisce la registrazione riesce
+  comunque (l'errore è nel log, `origin: "write_failed"`).
+- **Flusso**: `GET /auth/join?c=` mostra la pagina (solo se la campagna è utilizzabile); `POST /auth/join` prende un uso in
+  modo atomico (DynamoDB, scrittura condizionata), poi `AdminCreateUser` (`MessageAction=SUPPRESS`, `email_verified=true`,
   password scelta come temporanea così la policy del pool viene controllata prima che esista l'utente) e
   `AdminSetUserPassword` (permanente). Se Cognito rifiuta (email già registrata, password debole) l'uso viene restituito
   e il modulo si riapre. Il pool resta `allow_admin_create_user_only = true`: nessuna auto-registrazione diretta su Cognito.
-- **Token**: 32 byte casuali (base64url, 43 caratteri). In DynamoDB c'è solo lo `sha256(token)`: il token si vede **una sola
-  volta**, nell'URL mostrato alla creazione. Se lo perdi, revoca il link e creane un altro.
-- **Stati**: `revocato` > `scaduto` > `esaurito` > `attivo`. Per chi apre il link, link sconosciuto, scaduto, esaurito o
-  revocato sono indistinguibili (stessa pagina "Link non valido o scaduto", stesso 410).
+- **Stati**: `disattivata` > `scaduta` > `esaurita` > `attiva`. Per chi apre il link, id sconosciuto o malformato, campagna
+  eliminata, disattivata, scaduta o esaurita sono indistinguibili (stessa pagina "Link non valido o scaduto", stesso 410). I
+  vecchi link `?t=<token>` non funzionano più (stessa pagina 410) e le vecchie voci nella tabella vengono ignorate.
+- **Modifica**: dal pannello si cambiano nome, nota pubblica, nota interna (solo admin), usi massimi, scadenza (data assoluta,
+  al massimo `max_ttl_hours` da adesso) e lo stato acceso/spento. Gli usi massimi non possono scendere sotto gli usi già
+  consumati. Per **riattivare** una campagna scaduta o esaurita: riaccendila e/o sposta la scadenza / alza gli usi.
+- **Eliminazione**: `DELETE /api/admin/invite-links/<id>` è una cancellazione vera e idempotente. Non tocca gli account già
+  creati né la loro origine (usa il dettaglio utente per disabilitare o eliminare un utente). Ogni creazione, modifica ed
+  eliminazione è nell'audit (`link_create`, `link_update`, `link_delete`; il target è l'id).
 - **Variabili Terraform** (`invite_links`, oggetto con tutti i campi opzionali; vedi `terraform.tfvars.example`):
 
   | Campo | Default | Significato |
   |---|---|---|
   | `default_ttl_hours` / `max_ttl_hours` | 168 / 720 | validità proposta / massima (ore) |
-  | `default_max_uses` / `max_max_uses` | 1 / 50 | usi proposti / massimi per link |
-  | `retention_days` | 30 | quanto restano in tabella (e nell'elenco admin) i link scaduti o revocati, dopo la scadenza |
+  | `default_max_uses` / `max_max_uses` | 1 / 50 | usi proposti / massimi per campagna |
+  | `name_max_length` | 60 | lunghezza massima del nome |
+  | `public_note_max_length` / `internal_note_max_length` | 500 / 200 | lunghezza massima della nota pubblica / interna |
+  | `join_description` | testo italiano su Quizzer | descrizione breve mostrata sulla pagina pubblica di **ogni** campagna |
   | `join_attempts` / `join_window_seconds` | 10 / 600 | limite per IP su `POST /auth/join` (best-effort, per container) |
 
   Finiscono nel blocco `inviteLinks` del parametro SSM `/quizzer/<env>/config`; senza il blocco la funzione risponde 404
   `invite_links_disabled`.
 - **Attenzione: l'email non è verificata.** Il nuovo utente ha `email_verified=true` **senza che nessuno abbia dimostrato
   di possedere quell'indirizzo**: chi ha il link può registrare qualunque email (anche di altri) e il recupero password
-  di Cognito (`verified_email`) manderebbe poi i codici a quell'indirizzo. Per questo il link non dà accesso a dati: la
-  fiducia sta nel link (usi e durata limitati) e nell'admin che poi abilita i gruppi. Prima di abilitare un utente
-  controlla che l'email sia quella attesa.
-- **Come revocare**: pannello admin, "Revoca" sul link (`DELETE /api/admin/invite-links/<id>`, idempotente). Vale subito
-  per chi non ha ancora completato la registrazione; **non** cancella gli account già creati (usa il dettaglio utente:
-  disabilita o elimina). Ogni creazione/revoca è nell'audit (`link_create`, `link_revoke`; il target è l'id, mai il token).
-- **Retention**: la tabella ha il TTL DynamoDB sull'attributo `ttl` = scadenza + `retention_days`; DynamoDB cancella gli
-  elementi entro circa 48 ore dopo quel momento. Fino ad allora il link compare nell'elenco con il suo stato.
+  di Cognito (`verified_email`) manderebbe poi i codici a quell'indirizzo. Per questo la campagna non dà accesso a dati: la
+  fiducia sta nel link (usi e durata limitati, spegnibile in ogni momento) e nell'admin che poi abilita i gruppi. Prima di
+  abilitare un utente controlla che l'email sia quella attesa.
 - **Funzionamento tecnico**: CloudFront OAC rifiuta un `POST` verso la Function URL senza `x-amz-content-sha256`, che un
   `<form>` HTML non può inviare. Per questo la pagina carica `/auth/join.js` (servito dalla Lambda stessa, compatibile
   con la CSP `script-src 'self'`), che invia il modulo con `fetch` aggiungendo l'hash. Senza JavaScript il modulo non
-  può essere inviato attraverso CloudFront.
-- **IAM**: la Lambda `auth` ha solo `dynamodb:GetItem|UpdateItem` sulla tabella e `AdminCreateUser|AdminSetUserPassword`
-  su `userpool/*` (stesso account/regione, per evitare lo stesso ciclo Terraform della Lambda `admin`); non ha
-  `AdminAddUserToGroup`, quindi non può dare gruppi. La Lambda `admin` ha `PutItem|GetItem|UpdateItem|Scan` sulla tabella.
-- **Deploy**: `terraform apply` crea la tabella `quizzer-<env>-invite-links` e aggiorna il parametro SSM; servono
-  `npm run build:lambda` e `npm run build:admin` prima del `plan`.
+  può essere inviato attraverso CloudFront. Il logo è `/icon-192.svg` (stessa origine, `img-src 'self'`).
+- **IAM**: la Lambda `auth` ha `dynamodb:GetItem|UpdateItem` sulla tabella delle campagne, solo `dynamodb:PutItem` su quella
+  delle origini e `AdminCreateUser|AdminSetUserPassword` su `userpool/*` (stesso account/regione, per evitare lo stesso
+  ciclo Terraform della Lambda `admin`); non ha `AdminAddUserToGroup`, quindi non può dare gruppi. La Lambda `admin` ha
+  `PutItem|GetItem|UpdateItem|DeleteItem|Scan` sulla tabella delle campagne e `BatchGetItem|GetItem` su quella delle origini.
+- **Deploy**: `terraform apply` crea la tabella `quizzer-<env>-user-origin`, aggiorna il parametro SSM (nuovi campi) e le politiche IAM; servono `npm run build:lambda` e `npm run build:admin` prima del `plan`.
 
 ## 10. Primo publish dei dati
 
@@ -430,7 +439,7 @@ Svuotare un bucket con versioning dalla console ("Empty") è il modo più sempli
 | S3 (circa 20 MB più versioni e log) | | < 0,05 USD |
 | CloudWatch Logs (90 giorni) | pochi MB | < 0,10 USD |
 | KVS | 1 store, letture dalla Lambda | trascurabile |
-| DynamoDB (link di invito) | on-demand, poche decine di operazioni | 0 (free tier) |
+| DynamoDB (campagne e origine utenti) | on-demand, poche decine di operazioni | 0 (free tier) |
 | **Totale** | | **meno di 0,5 USD/mese**, coperto dai crediti; budget di allarme a 5 USD |
 
 Fonti: https://aws.amazon.com/cloudfront/pricing/, https://aws.amazon.com/lambda/pricing/,

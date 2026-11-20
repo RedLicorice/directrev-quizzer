@@ -8,7 +8,7 @@ function page(title: string, body: string): string {
 <title>${esc(title)}</title>
 <style>body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
 main{max-width:28rem;background:#1e293b;border-radius:12px;padding:24px}a{color:#38bdf8}h1{font-size:1.25rem;margin-top:0}
-label{display:block;margin:12px 0 4px}input{width:100%;box-sizing:border-box;padding:8px;border-radius:6px;border:1px solid #475569;background:#0f172a;color:inherit;font:inherit}
+img.logo{display:block;margin:0 0 12px}.note{white-space:pre-line}label{display:block;margin:12px 0 4px}input{width:100%;box-sizing:border-box;padding:8px;border-radius:6px;border:1px solid #475569;background:#0f172a;color:inherit;font:inherit}
 button{margin-top:16px;padding:8px 16px;border:0;border-radius:6px;background:#38bdf8;color:#0f172a;font:inherit;font-weight:600;cursor:pointer}.err{color:#fca5a5}</style>
 </head><body><main>${body}</main></body></html>`;
 }
@@ -29,7 +29,7 @@ export const loginErrorPage = (reason: string) =>
 <p><a href="/auth/login">Riprova ad accedere</a></p>`,
   );
 
-// Invite links (/auth/join). The link state is never told apart: every invalid link gets the same page.
+// Campaigns (/auth/join). The link state is never told apart: every invalid link gets the same page.
 export const joinInvalidPage = () =>
   page('Link non valido', `<h1>Link non valido o scaduto</h1>\n<p>Chiedi all'amministratore un nuovo link di invito.</p>`);
 
@@ -47,14 +47,21 @@ export const joinDonePage = () =>
 <p>L'accesso ai contenuti verrà abilitato dall'amministratore: fino ad allora vedrai "Accesso non abilitato".</p>`,
   );
 
-// The script is served by this Lambda (`script-src 'self'`): a plain form POST cannot carry the
-// `x-amz-content-sha256` header CloudFront OAC needs on POST to a Lambda Function URL.
-export const joinFormPage = (token: string, email = '', error = '') =>
+export interface JoinPageContent {
+  campaignId: string;
+  name: string;
+  description: string;
+  publicNote?: string;
+}
+
+export const joinFormPage = (c: JoinPageContent, email = '', error = '') =>
   page(
-    'Crea il tuo account',
-    `<h1>Crea il tuo account</h1>
-${error ? `<p class="err" role="alert">${esc(error)}</p>` : ''}<form method="post" action="/auth/join">
-<input type="hidden" name="t" value="${esc(token)}">
+    c.name,
+    `<img class="logo" src="/icon-192.svg" alt="Quizzer" width="72" height="72">
+<h1>${esc(c.name)}</h1>
+<p>${esc(c.description)}</p>
+${c.publicNote ? `<p class="note">${esc(c.publicNote)}</p>\n` : ''}${error ? `<p class="err" role="alert">${esc(error)}</p>` : ''}<form method="post" action="/auth/join">
+<input type="hidden" name="c" value="${esc(c.campaignId)}">
 <label for="email">Email</label>
 <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required value="${esc(email)}">
 <label for="password">Password</label>
@@ -66,6 +73,8 @@ ${error ? `<p class="err" role="alert">${esc(error)}</p>` : ''}<form method="pos
 <script src="/auth/join.js"></script>`,
   );
 
+// The script is served by this Lambda (`script-src 'self'`): a plain form POST cannot carry the
+// `x-amz-content-sha256` header CloudFront OAC needs on POST to a Lambda Function URL.
 export const JOIN_SCRIPT = `(function () {
   if (document.documentElement.dataset.joinBound) return;
   document.documentElement.dataset.joinBound = '1';

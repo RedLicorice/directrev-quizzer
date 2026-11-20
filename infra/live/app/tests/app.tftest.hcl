@@ -112,13 +112,17 @@ run "full_stack" {
       sessionTtlSeconds = 1800
       refreshCookieDays = 30
       inviteLinks = {
-        tableName       = "quizzer-prod-invite-links"
-        defaultTtlHours = 168
-        maxTtlHours     = 720
-        defaultMaxUses  = 1
-        maxMaxUses      = 50
-        retentionDays   = 30
-        joinRateLimit   = { attempts = 10, windowSeconds = 600 }
+        tableName             = "quizzer-prod-invite-links"
+        originTableName       = "quizzer-prod-user-origin"
+        defaultTtlHours       = 168
+        maxTtlHours           = 720
+        defaultMaxUses        = 1
+        maxMaxUses            = 50
+        nameMaxLength         = 60
+        publicNoteMaxLength   = 500
+        internalNoteMaxLength = 200
+        joinDescription       = "Quizzer: allenamento e simulazioni d'esame per le certificazioni cloud e di integrazione. Crea il tuo account per iniziare."
+        joinRateLimit         = { attempts = 10, windowSeconds = 600 }
       }
     }
     error_message = "SSM runtime config must match CONTRACT.md §6."
@@ -239,6 +243,8 @@ run "invite_links_overrides" {
       default_ttl_hours = 24
       max_max_uses      = 5
       join_attempts     = 3
+      name_max_length   = 30
+      join_description  = "Custom description"
     }
   }
   assert {
@@ -246,7 +252,10 @@ run "invite_links_overrides" {
       jsondecode(aws_ssm_parameter.config.value).inviteLinks.defaultTtlHours == 24 &&
       jsondecode(aws_ssm_parameter.config.value).inviteLinks.maxMaxUses == 5 &&
       jsondecode(aws_ssm_parameter.config.value).inviteLinks.maxTtlHours == 720 &&
-      jsondecode(aws_ssm_parameter.config.value).inviteLinks.joinRateLimit.attempts == 3
+      jsondecode(aws_ssm_parameter.config.value).inviteLinks.joinRateLimit.attempts == 3 &&
+      jsondecode(aws_ssm_parameter.config.value).inviteLinks.nameMaxLength == 30 &&
+      jsondecode(aws_ssm_parameter.config.value).inviteLinks.publicNoteMaxLength == 500 &&
+      jsondecode(aws_ssm_parameter.config.value).inviteLinks.joinDescription == "Custom description"
     )
     error_message = "Unset invite_links attributes keep their defaults."
   }
@@ -271,7 +280,7 @@ run "rejects_non_positive_or_fractional_invite_limits" {
 run "rejects_fractional_invite_limit" {
   command = plan
   variables {
-    invite_links = { retention_days = 1.5 }
+    invite_links = { public_note_max_length = 1.5 }
   }
   expect_failures = [var.invite_links]
 }

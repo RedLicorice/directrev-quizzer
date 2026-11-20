@@ -174,7 +174,7 @@ The path identifies a user by `base64url(username)`: the Cognito username is the
 | Method + path | Body | Success | Errors |
 |---|---|---|---|
 | `GET /api/admin/overview` | | 200 `{datasets, users:{total,confirmed,pending,disabled}}` | 401/403 |
-| `GET /api/admin/users?filter=` | | 200 `{users:[{key,email,sub?,status,enabled,groups}]}` | 401/403 |
+| `GET /api/admin/users?filter=` | | 200 `{users:[{key,email,sub?,status,enabled,groups,origin}]}`; `origin` = `{kind:"invited"}` or `{kind:"campaign",campaignId,name}` (§5.2); there is no separate single-user endpoint | 401/403 |
 | `POST /api/admin/users` | `{email, groups[], confirmMcd?}` | 201 invited + groups; Cognito e-mails a temporary password | 400 `bad_email`/`bad_group`/`mcd_confirmation_required`; 409 `exists`; 429 `rate_limited` |
 | `POST /api/admin/users/<k>/resend` | | 200 | 401/403/429 |
 | `PUT /api/admin/users/<k>/groups` | `{groups[], confirmMcd?}` | 200 `{groups}` | 400 `bad_group`/`mcd_confirmation_required`/`self_lockout`; 429 |
@@ -234,53 +234,73 @@ CloudFront update in about 1–2 minutes. No DynamoDB.
 - A stale `baseSha` is a 409, never a silent overwrite. Files above 1 MB (Contents API limit)
   are a logged 502.
 
-## 5.2 Invite links (`/auth/join`, `/api/admin/invite-links`)
+## 5.2 Campaigns (`/auth/join`, `/api/admin/invite-links`)
 
-An admin creates an invite link; whoever opens it registers with e-mail + password and the account is created directly
-(no e-mail is sent). The link grants **no dataset**: the new user gets no group and lands on "Accesso non abilitato"
-(`computeAccess` returns null) until an admin assigns groups. When `inviteLinks` is absent from the runtime config (§6)
-every route below answers **404** `{"error":"invite_links_disabled"}`.
+A campaign is a reusable invite link: the URL is **not a secret**, an admin can always copy it, edit it, switch it off,
+extend it and delete it. Whoever opens it sees the app logo, a short description and a public note, and registers with
+e-mail + password; the account is created directly (no e-mail is sent). A campaign grants **no dataset**: the new user gets
+no group and lands on "Accesso non abilitato" (`computeAccess` returns null) until an admin assigns groups. Every user has an
+**origin**: the campaign they registered through, or "invited" (created by an admin). When `inviteLinks` is absent from the
+runtime config (§6) every route below answers **404** `{"error":"invite_links_disabled"}`.
 
-**Token and storage.** Token = 32 random bytes, base64url (43 chars); URL `https://<appHosts[0]>/auth/join?t=<token>`.
-Only `id = sha256(token)` (lower-case hex, 64 chars) is stored; the token is shown to the admin once. DynamoDB table
-`<name_prefix>-invite-links` (PAY_PER_REQUEST, SSE on, hash key `id` S, TTL attribute `ttl` = `expiresAt/1000 +
-retentionDays*86400`). Item: `id, createdBy (e-mail), createdAt (ms), expiresAt (ms), maxUses, uses, note?, revokedAt?, ttl`.
-Status (derived): `revoked` (`revokedAt` set) > `expired` (`now >= expiresAt`) > `exhausted` (`uses >= maxUses`) > `active`.
-Redeem is one conditional `UpdateItem ADD uses :one` with `attribute_exists(id) AND attribute_not_exists(revokedAt) AND
-expiresAt > :now AND uses < maxUses`; if user creation then fails the use is given back (`ADD uses :minus_one`, best effort).
+**Storage.** Table `<name_prefix>-invite-links` (PAY_PER_REQUEST, SSE on, hash key `id` S). `id = randomBytes(12)` as
+base64url (16 chars, `CAMPAIGN_ID_RE = /^[A-Za-z0-9_-]{16}$/`), plain and stable for the life of the campaign. Item:
+`id, name, publicNote?, internalNote?, createdBy (e-mail), createdAt, updatedAt, expiresAt (ms), maxUses, uses, enabled`. No
+`ttl` is written (a campaign must survive its expiry so it can be reactivated; the table keeps the TTL setting declared but
+unused). Items of the old token-hash scheme (64 hex chars, `revokedAt`) are ignored (list filters on the id pattern).
+Status (derived): `disabled` (`enabled=false`) > `expired` (`now >= expiresAt`) > `exhausted` (`uses >= maxUses`) > `active`.
+Redeem is one conditional `UpdateItem ADD uses :one` with `attribute_exists(id) AND enabled = :true AND expiresAt > :now AND
+uses < maxUses` (returns the item, so the campaign name is known at redeem time); if user creation then fails the use is
+given back (`ADD uses :minus_one`, condition `uses > :zero`, best effort). An edit of `maxUses` is conditional on
+`uses <= :newMax`.
+
+Table `<name_prefix>-user-origin` (PAY_PER_REQUEST, SSE on, no TTL, hash key `username` S = the Cognito `Username`, the id
+the admin Lambda addresses users by; in this pool a generated id, not the e-mail). Item: `username, campaignId,
+campaignName (snapshot, survives rename and deletion), at (ms)`. No item = "invited" (admin-created users and everyone who
+existed before campaigns). The auth Lambda writes it after the account exists; a failed write is logged (`origin:
+"write_failed"`) and does **not** fail the registration.
 
 **Public (auth Lambda, under `/auth/*`).**
 
 | Method + path | Input | Success | Errors |
 |---|---|---|---|
-| `GET /auth/join?t=<token>` | | **200** HTML registration form (POSTs to `/auth/join`: hidden `t`, `email`, `password`, `password2`) | **410** HTML "Link non valido o scaduto", identical for unknown, malformed, expired, exhausted and revoked |
+| `GET /auth/join?c=<id>` | | **200** HTML: logo (`/icon-192.svg`, 72x72), the campaign name as heading, the `joinDescription` paragraph, the campaign `publicNote` when set (HTML-escaped plain text, `white-space: pre-line`), then the form (POSTs to `/auth/join`: hidden `c`, `email`, `password`, `password2`) | **410** HTML "Link non valido o scaduto", identical for malformed, unknown, deleted, disabled, expired and exhausted (and old `?t=` links) |
 | `GET /auth/join.js` | | **200** `text/javascript`: submits the form with `fetch` + `x-amz-content-sha256` (CloudFront OAC rejects a `POST` to a Function URL without it, and a plain `<form>` cannot send it) | |
-| `POST /auth/join` | `application/x-www-form-urlencoded`, body <= 4 KiB | **200** HTML "Account creato" (link to `/auth/login`) | **403** `bad_origin` (`Origin` not an app host, or `Sec-Fetch-Site` not same-origin); **429** HTML (per-IP limit `joinRateLimit`); **410** generic page (link not usable); **400** form again (bad e-mail, passwords differ, weak password: policy message); **409** form again "Esiste già un account con questa email"; **413** `too_large`; **500** HTML (unexpected Cognito error, use released) |
+| `POST /auth/join` | `application/x-www-form-urlencoded`, body <= 4 KiB | **200** HTML "Account creato" (link to `/auth/login`) | **403** `bad_origin` (`Origin` not an app host, or `Sec-Fetch-Site` not same-origin); **429** HTML (per-IP limit `joinRateLimit`); **410** generic page (campaign not usable); **400** form again (bad e-mail, passwords differ, weak password: policy message); **409** form again "Esiste già un account con questa email"; **413** `too_large`; **500** HTML (unexpected Cognito error, use released) |
 
-All pages: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`; no inline script (CSP `script-src 'self'`). Order on POST: origin,
-rate limit, body, link is active (read), input validation (**no use is consumed** for bad input), atomic redeem, Cognito
-`AdminCreateUser` (`MessageAction=SUPPRESS`, `email` + `email_verified=true`, the chosen password as `TemporaryPassword` so the pool
-policy is enforced before any user exists) then `AdminSetUserPassword` (`Permanent=true`). The pool keeps
-`allow_admin_create_user_only = true`. Log record `{"evt":"join","ip","id","result"}` with `result` in `ok`, `invalid_link`,
-`bad_email`, `password_mismatch`, `exists`, `invalid_password`, `error` (+ error **name**), `rate_limited`, `bad_origin`; never the
-password, the token or the e-mail.
+All pages: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`; no inline script (CSP `script-src 'self'`; the logo is
+same-origin, `img-src 'self'`). Order on POST: origin, rate limit, body, campaign is active (read), input validation (**no use is
+consumed** for bad input), atomic redeem, Cognito `AdminCreateUser` (`MessageAction=SUPPRESS`, `email` + `email_verified=true`,
+the chosen password as `TemporaryPassword` so the pool policy is enforced before any user exists) then `AdminSetUserPassword`
+(`Permanent=true`), then the origin item. The pool keeps `allow_admin_create_user_only = true`. Log record
+`{"evt":"join","ip","id","result"}` with `result` in `ok` (+ `origin`: `written` | `write_failed`), `invalid_link`, `bad_email`,
+`password_mismatch`, `exists`, `invalid_password`, `error` (+ error **name**), `rate_limited`, `bad_origin`; never the password or
+the e-mail.
 
-**Admin (admin Lambda, same three authorization layers, `x-qz-csrf: 1`, origin check).**
+**Admin (admin Lambda, same three authorization layers, `x-qz-csrf: 1`, origin check).** Campaign object: `{id, url, name,
+publicNote?, internalNote?, createdBy, createdAt, updatedAt, expiresAt, maxUses, uses, enabled, status}`; `url` =
+`https://<appHosts[0]>/auth/join?c=<id>`, built server-side. An id that does not match `CAMPAIGN_ID_RE` is a 404 `not_found`.
 
 | Method + path | Body | Success | Errors |
 |---|---|---|---|
-| `GET /api/admin/invite-links` | | 200 `{links:[{id,note?,createdBy,createdAt,expiresAt,maxUses,uses,status}], defaults:{ttlHours,maxTtlHours,maxUses,maxMaxUses}}`, newest first; never a token | 401/403/404 |
-| `POST /api/admin/invite-links` | `{ttlHours?, maxUses?, note?}` (omitted = defaults; integers in `[1, max]`; note <= 80 chars, no control characters) | 201 `{id,url,expiresAt,maxUses}` | 400 `bad_request` + `reason` (`ttlHours`, `maxUses`, `note`, `body`); 429 `rate_limited` (20/day per actor, shared constant with invites) |
-| `DELETE /api/admin/invite-links/<id>` | | 200 `{id,status:"revoked"}` (idempotent) | 404 `not_found` (unknown or not 64 hex chars); 429 (30 mutations/hour) |
+| `GET /api/admin/invite-links` | | 200 `{links: Campaign[], defaults:{ttlHours,maxTtlHours,maxUses,maxMaxUses,nameMaxLength,publicNoteMaxLength,internalNoteMaxLength}}`, newest first | 401/403/404 |
+| `POST /api/admin/invite-links` | `{name, ttlHours?, maxUses?, publicNote?, internalNote?}` (omitted numbers = defaults; integers in `[1, max]`; `name` required, single line, <= `nameMaxLength`; notes <= their max, line breaks allowed, no other control characters) | 201 Campaign | 400 `bad_request` + `reason` (`body`, `name`, `ttlHours`, `maxUses`, `publicNote`, `internalNote`); 429 `rate_limited` (20/day per actor, shared constant with invites) |
+| `PATCH /api/admin/invite-links/<id>` | any subset of `{name, publicNote, internalNote, maxUses, enabled, expiresAt}`; `expiresAt` = absolute epoch ms, in the future and at most `maxTtlHours` from now; an empty note removes it. Reactivating = `enabled:true` and/or a later `expiresAt` / higher `maxUses` | 200 Campaign | 400 `bad_request` + `reason` (as above, plus `expires_at`, `max_uses_below_uses`, `empty` for a body without fields, or the name of an unknown field); 404 `not_found`; 429 (30 mutations/hour) |
+| `DELETE /api/admin/invite-links/<id>` | | 200 `{id, deleted:true}` (hard delete, idempotent: an unknown id is also 200); users already registered keep their origin snapshot | 404 `not_found` (malformed id); 429 (30 mutations/hour) |
 
-Audit: `link_create` (target = id, detail `ttlHours=.. maxUses=..`) and `link_revoke` (target = id).
+Audit: `link_create` (target = id, detail = name), `link_update` (target = id, detail = changed fields), `link_delete` (target = id).
+The users list adds `origin` to every user, read with one `BatchGetItem` per page of 100 usernames on the origin table
+(`UnprocessedKeys` retried once, what is still missing counts as invited; an unreadable table is logged as
+`origin_read_failed` and the list still loads, everyone "invited").
 
 **Caveat.** The new user's e-mail is marked verified **without any proof** of ownership: whoever holds the link can register
-any address. That is why a link carries no access; an admin must check the e-mail before assigning groups.
+any address. That is why a campaign carries no access; an admin must check the e-mail before assigning groups.
 
-**IAM.** auth role: `dynamodb:GetItem|UpdateItem` on the table ARN; `cognito-idp:AdminCreateUser|AdminSetUserPassword` on
-`userpool/*` of the account/region (the exact pool ARN would create the Terraform cycle explained for the admin Lambda). It has no
-`AdminAddUserToGroup`. admin role: `dynamodb:PutItem|GetItem|UpdateItem|Scan` on the table ARN.
+**IAM.** auth role: `dynamodb:GetItem|UpdateItem` on the campaigns table ARN, `dynamodb:PutItem` on the origin table ARN (nothing
+more there); `cognito-idp:AdminCreateUser|AdminSetUserPassword` on `userpool/*` of the account/region (the exact pool ARN would
+create the Terraform cycle explained for the admin Lambda). It has no `AdminAddUserToGroup`. admin role:
+`dynamodb:PutItem|GetItem|UpdateItem|DeleteItem|Scan` on the campaigns table ARN and `dynamodb:BatchGetItem|GetItem` on the origin
+table ARN.
 
 ## 6. Runtime config (SSM parameter `/quizzer/prod/config`, String, JSON)
 ```json
@@ -299,18 +319,22 @@ any address. That is why a link carries no access; an admin must check the e-mai
   "refreshCookieDays": 30,
   "inviteLinks": {
     "tableName": "quizzer-prod-invite-links",
+    "originTableName": "quizzer-prod-user-origin",
     "defaultTtlHours": 168,
     "maxTtlHours": 720,
     "defaultMaxUses": 1,
     "maxMaxUses": 50,
-    "retentionDays": 30,
+    "nameMaxLength": 60,
+    "publicNoteMaxLength": 500,
+    "internalNoteMaxLength": 200,
+    "joinDescription": "Quizzer: allenamento e simulazioni d'esame per le certificazioni cloud e di integrazione. Crea il tuo account per iniziare.",
     "joinRateLimit": { "attempts": 10, "windowSeconds": 600 }
   }
 }
 ```
 
-`inviteLinks` is optional (absent = feature off); `parseConfig` requires every field to be a positive integer (`tableName` a
-valid table name) and `default* <= max*`. Terraform fills it from the `invite_links` variable (§5.2).
+`inviteLinks` is optional (absent = feature off); `parseConfig` requires every number to be a positive integer, both table
+names to be valid, `joinDescription` a non-empty string, and `default* <= max*`. Terraform fills it from the `invite_links` variable (§5.2).
 
 The Lambda reads it at cold start (cache 5 min). Environment variables of the Lambda: `CONFIG_PARAMETER`
 (the parameter name), `KVS_ARN`. This breaks the Terraform dependency cycle (plan v2 §4.4).
