@@ -8,6 +8,8 @@ export interface Question {
   id: number;
   /** Number of the question in the source document, when it has one (e.g. "12", "T2-14"). */
   sourceNumber?: string;
+  /** Kept in the dataset (the id stays reserved) but never offered in sessions. */
+  disabled?: boolean;
   text: string;
   options: Option[];
   selectCount: number;

@@ -185,7 +185,7 @@ export async function loadDataset(src: SourceConfig, entry: DatasetEntry): Promi
   const raw = (await res.json()) as Question[];
   if (!Array.isArray(raw) || raw.length === 0 || !raw[0].text) throw new Error(`${entry.file}: not a valid questions array`);
   const baseDir = datasetBaseDir(entry);
-  return raw.map((q) => resolveQuestion(src, baseDir, q));
+  return raw.filter((q) => !q.disabled).map((q) => resolveQuestion(src, baseDir, q));
 }
 
 // ── private images ─────────────────────────────────────────────────────────

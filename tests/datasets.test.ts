@@ -104,4 +104,14 @@ describe('hosted source loading (aws build)', () => {
     expect(qs[0].image).toBe('/data/mule-mcd-01/images/q001.jpeg');
     expect(qs[0].options[0].image).toBe('/data/mule-mcd-01/images/q001_A.jpeg');
   });
+
+  it('questions marked disabled stay in the dataset but are not loaded', async () => {
+    const opts = [{ text: 'a', correct: true }, { text: 'b', correct: false }];
+    vi.stubGlobal('fetch', vi.fn(async () => json(200, [
+      { id: 1, text: 'Q1', selectCount: 1, options: opts },
+      { id: 2, text: 'Q2', selectCount: 1, options: opts, disabled: true },
+    ])));
+    const qs = await loadDataset(hostedSource(), { id: 'mule-mcd-01', title: 'MCD', file: 'mule-mcd-01/questions.json' });
+    expect(qs.map((q) => q.id)).toEqual([1]);
+  });
 });
