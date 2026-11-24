@@ -5,6 +5,7 @@ import { calculateScore, isAnswerCorrect } from '../utils/scoring';
 import { formatSeconds } from '../hooks/useTimer';
 import { OptionText } from './MarkdownText';
 import QuestionIdBadge from './QuestionIdBadge';
+import DatasetImage from './DatasetImage';
 
 interface Props {
   result: SessionResult;
@@ -103,6 +104,9 @@ export default function ResultsScreen({ result, onHome, onRetry }: Props) {
 
                   {expanded && (
                     <div className="px-4 pb-4 space-y-1.5 border-t border-slate-700/50 pt-3">
+                      {q.image && (
+                        <DatasetImage src={q.image} alt="Question diagram" className="mb-2 max-w-full rounded-lg border border-slate-700/50 mx-auto block" style={{ maxHeight: '400px' }} />
+                      )}
                       {q.options.map((opt, j) => {
                         const wasSelected = selected.includes(j);
                         let cls = 'text-slate-400 text-sm py-1.5 px-3 rounded-lg ';
@@ -115,6 +119,10 @@ export default function ResultsScreen({ result, onHome, onRetry }: Props) {
                             <span className="shrink-0 w-3">{opt.correct ? '✓' : wasSelected ? '✗' : ''}</span>
                             <div className="flex-1 min-w-0">
                               <OptionText text={opt.text} />
+                              {opt.image && (
+                                <DatasetImage src={opt.image} alt={`Option ${String.fromCharCode(65 + j)}`}
+                                  className="mt-2 max-w-full rounded border border-slate-700/50" style={{ maxHeight: '300px' }} />
+                              )}
                             </div>
                           </div>
                         );
