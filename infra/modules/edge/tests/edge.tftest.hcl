@@ -25,6 +25,14 @@ run "function_and_kvs" {
   }
 }
 
+run "forward_host_function" {
+  command = apply
+  assert {
+    condition     = aws_cloudfront_function.forward_host.runtime == "cloudfront-js-2.0" && aws_cloudfront_function.forward_host.publish && aws_cloudfront_function.forward_host.key_value_store_associations == null && strcontains(aws_cloudfront_function.forward_host.code, "x-forwarded-host")
+    error_message = "forward-host copies the viewer host into x-forwarded-host (no KVS, published, js-2.0)."
+  }
+}
+
 run "response_headers" {
   command = apply
   assert {

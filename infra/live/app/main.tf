@@ -63,6 +63,7 @@ module "site" {
   name_prefix                     = local.name_prefix
   account_id                      = var.account_id
   session_check_function_arn      = module.edge.function_arn
+  forward_host_function_arn       = module.edge.forward_host_function_arn
   app_response_headers_policy_id  = module.edge.app_response_headers_policy_id
   data_response_headers_policy_id = module.edge.data_response_headers_policy_id
   data_cache_policy_id            = module.edge.data_cache_policy_id

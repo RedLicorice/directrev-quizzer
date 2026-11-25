@@ -21,3 +21,7 @@ output "data_response_headers_policy_id" {
 output "data_cache_policy_id" {
   value = aws_cloudfront_cache_policy.data.id
 }
+
+output "forward_host_function_arn" {
+  value = aws_cloudfront_function.forward_host.arn
+}

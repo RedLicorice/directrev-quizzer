@@ -11,6 +11,11 @@ variable "session_check_function_arn" {
   type = string
 }
 
+variable "forward_host_function_arn" {
+  description = "Viewer-request function that copies the viewer Host into x-forwarded-host (used on /auth/*)."
+  type        = string
+}
+
 variable "app_response_headers_policy_id" {
   type = string
 }

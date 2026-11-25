@@ -121,6 +121,11 @@ resource "aws_cloudfront_distribution" "this" {
     cache_policy_id            = local.managed.caching_disabled
     origin_request_policy_id   = local.managed.all_viewer_except_host
     response_headers_policy_id = var.app_response_headers_policy_id
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = var.forward_host_function_arn
+    }
   }
 
   ordered_cache_behavior {

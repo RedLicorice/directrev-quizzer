@@ -18,6 +18,28 @@ resource "aws_cloudfront_function" "session_check" {
   key_value_store_associations = [aws_cloudfront_key_value_store.session.arn]
 }
 
+# /auth/* uses the AllViewerExceptHost origin request policy, so the auth Lambda never sees the
+# host the visitor used. This function copies it (overwriting any client-sent value) into
+# x-forwarded-host, which the Lambda only trusts when it is one of the configured app hosts.
+resource "aws_cloudfront_function" "forward_host" {
+  name    = "${var.name_prefix}-forward-host"
+  runtime = "cloudfront-js-2.0"
+  comment = "Copies the viewer Host into x-forwarded-host for /auth/*"
+  publish = true
+  code    = <<-EOT
+    function handler(event) {
+      var request = event.request;
+      var host = request.headers.host;
+      if (host && host.value) {
+        request.headers['x-forwarded-host'] = { value: host.value.toLowerCase() };
+      } else {
+        delete request.headers['x-forwarded-host'];
+      }
+      return request;
+    }
+  EOT
+}
+
 locals {
   security_headers = {
     hsts_max_age = 63072000

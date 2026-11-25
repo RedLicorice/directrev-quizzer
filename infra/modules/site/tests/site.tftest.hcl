@@ -27,6 +27,7 @@ variables {
   name_prefix                     = "quizzer-test"
   account_id                      = "123456789012"
   session_check_function_arn      = "arn:aws:cloudfront::123456789012:function/quizzer-test-session-check"
+  forward_host_function_arn       = "arn:aws:cloudfront::123456789012:function/quizzer-test-forward-host"
   app_response_headers_policy_id  = "app-rhp"
   data_response_headers_policy_id = "data-rhp"
   data_cache_policy_id            = "data-cp"
@@ -155,8 +156,10 @@ run "behaviors" {
     error_message = "/api/admin/* is protected by session-check (viewer-request, adm=true)."
   }
   assert {
-    condition     = aws_cloudfront_distribution.this.ordered_cache_behavior[1].target_origin_id == "auth-lambda" && length(aws_cloudfront_distribution.this.ordered_cache_behavior[1].function_association) == 0
-    error_message = "/auth/* goes to the Lambda and has NO session-check."
+    condition = aws_cloudfront_distribution.this.ordered_cache_behavior[1].target_origin_id == "auth-lambda" && [for f in aws_cloudfront_distribution.this.ordered_cache_behavior[1].function_association : [f.event_type, f.function_arn]] == [
+      ["viewer-request", "arn:aws:cloudfront::123456789012:function/quizzer-test-forward-host"]
+    ]
+    error_message = "/auth/* goes to the Lambda with NO session-check, only the forward-host function (the Lambda needs the viewer host)."
   }
   assert {
     condition     = aws_cloudfront_distribution.this.ordered_cache_behavior[1].cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" && aws_cloudfront_distribution.this.ordered_cache_behavior[1].origin_request_policy_id == "b689b0a8-53d0-40ab-baf2-68738e2966ac"
